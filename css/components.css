@@ -250,6 +250,95 @@
   height: 36px;
 }
 
+/* ========== API MODE SWITCH ========== */
+
+.api-mode-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.api-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.api-mode-option input {
+  margin: 0;
+  accent-color: var(--color-candy-pink);
+}
+
+.api-mode-option input:checked + span {
+  color: var(--color-candy-pink);
+  font-weight: 600;
+}
+
+.api-mode-option:has(input:checked) {
+  border-color: var(--color-candy-pink);
+  background: linear-gradient(135deg, rgba(255,143,171,0.08), rgba(195,166,255,0.08));
+}
+
+.settings-mode-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* ========== SCENE CONFIRM DIALOG ========== */
+
+.scene-confirm-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  z-index: 980;
+}
+
+.scene-confirm-dialog {
+  width: min(520px, 100%);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.scene-confirm-dialog h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--color-text-primary);
+}
+
+.scene-confirm-desc,
+.scene-confirm-summary,
+.scene-confirm-reason {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.scene-confirm-summary {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.scene-confirm-actions {
+  margin-top: var(--space-sm);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
 /* ========== SLIDERS ========== */
 
 .slider-item {

@@ -105,21 +105,54 @@
     </div>
     <div class="side-panel-body">
       <div class="form-group">
-        <label for="api-base-url">API Base URL</label>
-        <input type="text" id="api-base-url" placeholder="https://api.openai.com/v1">
-      </div>
-      <div class="form-group">
-        <label for="api-key">API Key</label>
-        <div class="input-with-toggle">
-          <input type="password" id="api-key" placeholder="sk-...">
-          <button id="toggle-key-visibility" class="btn-icon" title="显示/隐藏">
-            <svg width="18" height="18"><use href="#icon-eye"/></svg>
-          </button>
+        <label>连接模式</label>
+        <div id="api-mode-group" class="api-mode-group">
+          <label class="api-mode-option">
+            <input type="radio" name="api-mode" value="managed" checked>
+            <span>后台托管</span>
+          </label>
+          <label class="api-mode-option">
+            <input type="radio" name="api-mode" value="custom">
+            <span>用户自定义</span>
+          </label>
         </div>
       </div>
-      <div class="form-group">
-        <label for="model-name">模型名称</label>
-        <input type="text" id="model-name" placeholder="gpt-4o">
+
+      <div id="managed-config-section" class="settings-mode-section">
+        <div class="form-group">
+          <label for="managed-model-name">模型名称</label>
+          <input type="text" id="managed-model-name" placeholder="例如: gpt-4o / gpt-4.1">
+        </div>
+        <div class="form-group">
+          <p style="margin:0;font-size:0.82rem;color:var(--color-text-secondary);line-height:1.5">
+            API Key 与端点已由后台托管（/api/chat），你只需设置模型名。
+          </p>
+        </div>
+      </div>
+
+      <div id="custom-config-section" class="settings-mode-section hidden">
+        <div class="form-group">
+          <label for="custom-api-base-url">API Base URL</label>
+          <input type="text" id="custom-api-base-url" placeholder="https://api.openai.com/v1">
+        </div>
+        <div class="form-group">
+          <label for="custom-api-key">API Key</label>
+          <div class="input-with-toggle">
+            <input type="password" id="custom-api-key" placeholder="sk-...">
+            <button id="toggle-custom-key-visibility" class="btn-icon" title="显示/隐藏">
+              <svg width="18" height="18"><use href="#icon-eye"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="custom-model-name">模型名称</label>
+          <input type="text" id="custom-model-name" placeholder="例如: gpt-4o / gpt-4.1">
+        </div>
+        <div class="form-group">
+          <p style="margin:0;font-size:0.82rem;color:var(--color-text-secondary);line-height:1.5">
+            自定义模式会在浏览器中直连你的端点，请确保上游允许浏览器跨域请求（CORS）。
+          </p>
+        </div>
       </div>
       <div class="candy-stripe-bar"></div>
       <button id="test-connection" class="btn-secondary btn-full">测试连接</button>
@@ -141,6 +174,20 @@
       <button id="clear-history" class="btn-text" style="align-self:center;margin-top:auto">清空全部</button>
     </div>
   </aside>
+
+  <!-- ========== Scene Recommendation Confirm Dialog ========== -->
+  <div id="scene-confirm-overlay" class="overlay scene-confirm-overlay">
+    <div class="scene-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="scene-confirm-title">
+      <h3 id="scene-confirm-title">检测到新的场景建议</h3>
+      <p class="scene-confirm-desc">你已手动调整过相机或布光，再次分析将产生冲突。</p>
+      <p id="scene-confirm-summary" class="scene-confirm-summary"></p>
+      <p id="scene-confirm-reason" class="scene-confirm-reason"></p>
+      <div class="scene-confirm-actions">
+        <button id="scene-confirm-keep" class="btn-secondary">保留当前设置</button>
+        <button id="scene-confirm-apply" class="btn-primary">应用新建议</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ========== Header ========== -->
   <header class="app-header">
