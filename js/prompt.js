@@ -221,10 +221,15 @@ export function buildOptimizeMessages(userPrompt, params) {
   if (links && links.length > 0) {
     linkDesc = links.map(l => {
       const fromEl = allElems.find(e => e.id === l.fromId);
-      const toEl = allElems.find(e => e.id === l.toId);
-      const typeLabel = l.type === 'same-plane' ? 'same depth plane' : l.label || l.type;
-      let line = `- ${fromEl?.name || '?'} ←${typeLabel}→ ${toEl?.name || '?'}`;
-      if (l.description) line += ` (${l.description})`;
+      const toEl   = allElems.find(e => e.id === l.toId);
+      let typeLabel;
+      if (l.type === 'same-plane') {
+        typeLabel = 'share the same focal plane (both in focus)';
+      } else {
+        typeLabel = l.label || l.type;
+      }
+      let line = `- ${fromEl?.name || '?'} and ${toEl?.name || '?'}: ${typeLabel}`;
+      if (l.description) line += ` — "${l.description}"`;
       return line;
     }).join('\n');
   }
@@ -430,12 +435,25 @@ function clamp(val, min, max) {
 /* ---- Audit helpers: convert coords to spatial descriptions ---- */
 
 /**
- * Convert x%, y% position to a spatial description.
- * e.g. (25, 30) → "upper-left area"
+ * Convert x%, y% position to a spatial description (5-zone horizontal, 3-zone vertical).
+ * Examples:
+ *   (35, 55) → "left-center area"
+ *   (65, 55) → "right-center area"
+ *   (50, 50) → "center of frame"
+ *   (10, 20) → "upper far-left area"
  */
 function posToSpatial(x, y) {
-  const h = x < 33 ? 'left' : x > 66 ? 'right' : 'center';
+  // Horizontal: 5 zones
+  let h;
+  if      (x < 20) h = 'far-left';
+  else if (x < 40) h = 'left-center';
+  else if (x < 60) h = 'center';
+  else if (x < 80) h = 'right-center';
+  else             h = 'far-right';
+
+  // Vertical: 3 zones
   const v = y < 33 ? 'upper' : y > 66 ? 'lower' : 'middle';
+
   if (h === 'center' && v === 'middle') return 'center of frame';
   if (h === 'center') return `${v} area`;
   if (v === 'middle') return `${h} side`;
@@ -444,12 +462,11 @@ function posToSpatial(x, y) {
 
 /**
  * Convert w%, h% size to a relative scale description.
- * e.g. (30, 40) → "prominent" ; (10, 15) → "small"
  */
 function sizeToScale(w, h) {
   const area = w * h;
   if (area > 800) return 'dominant';
   if (area > 400) return 'prominent';
-  if (area > 200) return 'medium';
+  if (area > 150) return 'medium';
   return 'small';
 }
