@@ -267,26 +267,23 @@ ul, ol {
   border-color: var(--color-border);
 }
 
-/* Canvas element info boxes */
-[data-theme="dark"] .canvas-element-info,
-[data-theme="dark"] .elem-label {
-  color: var(--color-text-primary);
+/* Layer panel (current canvas classes) */
+[data-theme="dark"] #layer-panel {
+  border-left-color: var(--color-border);
 }
 
-/* Layer panel */
-[data-theme="dark"] .layer-panel,
-[data-theme="dark"] .layer-item {
-  background: var(--color-bg-card);
+[data-theme="dark"] .layer-tag {
+  border-color: transparent;
+}
+
+[data-theme="dark"] .layer-tag:hover {
+  background: rgba(195, 166, 255, 0.1);
   border-color: var(--color-border);
-  color: var(--color-text-primary);
 }
 
-[data-theme="dark"] .layer-item:hover {
-  background: rgba(195, 166, 255, 0.08);
-}
-
-[data-theme="dark"] .layer-item.selected {
-  background: rgba(195, 166, 255, 0.15);
+[data-theme="dark"] .layer-tag.layer-tag-active {
+  background: rgba(195, 166, 255, 0.16);
+  border-color: var(--color-candy-lavender);
 }
 
 /* ---- Composition controls ---- */

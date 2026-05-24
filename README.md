@@ -362,7 +362,7 @@ DEFAULT_MODEL=gpt-4o
 ### 2. 前端设置项（用户侧）
 
 点击页面左上角 **⚙️ 设置** 后可选两种模式：
-- `后台托管`（默认）：只需填写模型名称（可留空，使用服务端 `DEFAULT_MODEL`）。
+- `后台托管`（默认）：前端无需填写模型，模型由服务端 `DEFAULT_MODEL`/后端策略统一控制。
 - `用户自定义`：需填写 `Base URL + API Key + Model`，浏览器将直接请求你的上游端点。
 
 > 自定义模式前置条件：上游端点必须允许浏览器跨域请求（CORS），否则会在浏览器侧被拦截。
@@ -413,7 +413,7 @@ DEFAULT_MODEL=gpt-4o
 
 | 模式 | 必填项 | 测试连接目标 | 请求路径 | 安全边界 |
 |------|--------|--------------|----------|----------|
-| 后台托管 (`managed`) | 无（模型可选） | `/api/chat` | 同源 `/api/chat` | 上游密钥仅在 Pages Secrets |
+| 后台托管 (`managed`) | 无 | `/api/chat` | 同源 `/api/chat` | 上游密钥与模型配置仅在 Pages Secrets/服务端 |
 | 用户自定义 (`custom`) | `Base URL` + `API Key` + `Model` | `${BaseURL}/chat/completions` | 浏览器直连 `${BaseURL}/chat/completions` | 密钥仅保存在当前浏览器 localStorage |
 
 ### API 本地存储键
@@ -421,7 +421,6 @@ DEFAULT_MODEL=gpt-4o
 | Key | 说明 |
 |-----|------|
 | `pc_api_mode` | 模式：`managed` / `custom` |
-| `pc_model_managed` | 托管模式模型名称 |
 | `pc_custom_base_url` | 自定义模式 Base URL |
 | `pc_custom_api_key` | 自定义模式 API Key |
 | `pc_custom_model` | 自定义模式模型名称 |

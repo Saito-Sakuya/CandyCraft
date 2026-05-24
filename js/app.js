@@ -99,8 +99,8 @@ function init() {
         showToast(`当前为用户自定义模式，请先填写：${missing.join(' / ')}`, 'info');
       }, 600);
     }
-  } else if (!config.managedModel) {
-    setTimeout(() => showToast('可在设置中填写模型名称；留空将使用服务端默认模型', 'info'), 600);
+  } else {
+    setTimeout(() => showToast('当前为后台托管模式，模型由服务端统一控制', 'info'), 600);
   }
 
   // Bind main events

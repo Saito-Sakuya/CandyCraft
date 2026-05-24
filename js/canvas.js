@@ -20,6 +20,8 @@ let dragState = null;
 let outsideHandler = null;  // click-outside listener ref
 let layerFilter = 'all';   // 'all' | 'foreground' | 'background'
 
+const DRAG_START_THRESHOLD_PX = 4;
+
 const LINK_TYPES = [
   { type: 'same-plane', label: '同一平面' },
   { type: 'gaze',       label: '对视' },
@@ -230,6 +232,12 @@ function renderElementBox(elem) {
     }
 
     e.stopPropagation();
+
+    if (e.altKey && !linkMode) {
+      selectThroughOverlap(e.clientX, e.clientY);
+      return;
+    }
+
     selectElement(elem.id);
     startDrag(e, elem, box);
   });
@@ -285,6 +293,7 @@ function renderLayerPanel() {
       <span class="layer-tag-handle" title="拖拽排序">\u2261</span>
       <span class="layer-tag-icon ${isFg ? 'layer-tag-fg' : 'layer-tag-bg'}">${layerBadge}</span>
       <span class="layer-tag-name">${esc(trunc(elem.name, 8))}</span>
+      <button class="layer-tag-edit" title="编辑">\u270E</button>
       <button class="layer-tag-up" title="上移">\u25B2</button>
       <button class="layer-tag-down" title="下移">\u25BC</button>
       <button class="layer-tag-del" title="删除">\u00D7</button>
@@ -295,6 +304,18 @@ function renderLayerPanel() {
       if (e.target.closest('button')) return;
       selectElement(elem.id);
       scrollToElement(elem.id);
+    });
+    tag.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openEditPopup(elem.id);
+    });
+
+    tag.querySelector('.layer-tag-edit').addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectElement(elem.id);
+      openEditPopup(elem.id);
     });
 
     // Move up (increase z-index)
@@ -463,6 +484,7 @@ function scrollToElement(id) {
 function startDrag(e, elem, boxEl) {
   e.preventDefault();
   const boardRect = boardEl.getBoundingClientRect();
+  let didDrag = false;
 
   dragState = {
     id: elem.id,
@@ -473,6 +495,13 @@ function startDrag(e, elem, boxEl) {
   };
 
   const move = (ev) => {
+    const deltaX = ev.clientX - dragState.startX;
+    const deltaY = ev.clientY - dragState.startY;
+    if (!didDrag && Math.hypot(deltaX, deltaY) < DRAG_START_THRESHOLD_PX) {
+      return;
+    }
+    didDrag = true;
+
     const dx = ((ev.clientX - dragState.startX) / boardRect.width) * 100;
     const dy = ((ev.clientY - dragState.startY) / boardRect.height) * 100;
     elem.x = clamp(dragState.origX + dx, 5, 95);
@@ -497,6 +526,19 @@ function startDrag(e, elem, boxEl) {
 
   document.addEventListener('pointermove', move);
   document.addEventListener('pointerup', up);
+}
+
+function selectThroughOverlap(clientX, clientY) {
+  const nodes = document.elementsFromPoint(clientX, clientY)
+    .filter((node) => boardEl?.contains(node) && node.classList?.contains('elem-box'));
+  if (!nodes.length) return;
+
+  const ids = [...new Set(nodes.map((node) => node.dataset.id).filter(Boolean))];
+  if (!ids.length) return;
+
+  const currentIndex = ids.indexOf(selectedId);
+  const nextId = ids[(currentIndex + 1 + ids.length) % ids.length];
+  selectElement(nextId);
 }
 
 function showCoordTooltip(boxEl, x, y) {

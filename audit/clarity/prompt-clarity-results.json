@@ -1,0 +1,297 @@
+{
+  "generatedAt": "2026-05-24T17:37:15.511Z",
+  "chatEndpoint": "http://127.0.0.1:8788/api/chat",
+  "modelEndpointAvailable": false,
+  "modelEndpointError": "HTTP 500: {\"error\":{\"code\":\"server_not_configured\",\"message\":\"服务端未完成配置，请联系管理员设置 UPSTREAM_BASE_URL 与 UPSTREAM_API_KEY\"},\"requestId\":\"bc46b6e2-5bf9-45ad-98d6-4e468ada6df5\"}",
+  "totals": {
+    "samples": 18,
+    "pass": 18,
+    "fail": 0,
+    "passRate": 1
+  },
+  "results": [
+    {
+      "id": "S01",
+      "group": "night",
+      "prompt": "雨夜街头霓虹，黑色风衣男子站在路灯下，电影感，低机位",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "夜晚",
+        "colorTemp": "冷蓝",
+        "lightQuality": "中性",
+        "lightingPreset": "侧光",
+        "reason": "规则匹配: 夜晚语义"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n雨夜街头霓虹，黑色风衣男子站在路灯下，电影感，低机位\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBac"
+    },
+    {
+      "id": "S02",
+      "group": "night",
+      "prompt": "赛博朋克夜景，潮湿柏油路反光，女孩回头看镜头，侧光",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "夜晚",
+        "colorTemp": "冷蓝",
+        "lightQuality": "中性",
+        "lightingPreset": "侧光",
+        "reason": "规则匹配: 夜晚语义 / 侧光关键词"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n赛博朋克夜景，潮湿柏油路反光，女孩回头看镜头，侧光\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    },
+    {
+      "id": "S03",
+      "group": "sunrise",
+      "prompt": "海边日出，少年在礁石上迎风而立，暖色逆光，广角全景",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "日出",
+        "colorTemp": "暖黄",
+        "lightQuality": "柔光",
+        "lightingPreset": "逆光",
+        "reason": "规则匹配: 日出语义 / 逆光关键词"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n海边日出，少年在礁石上迎风而立，暖色逆光，广角全景\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    },
+    {
+      "id": "S04",
+      "group": "golden",
+      "prompt": "黄金时刻的森林小径，情侣并肩散步，柔和光晕，浅景深",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "黄金",
+        "colorTemp": "金橙",
+        "lightQuality": "柔光",
+        "lightingPreset": "逆光",
+        "reason": "规则匹配: 黄金时段"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n黄金时刻的森林小径，情侣并肩散步，柔和光晕，浅景深\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    },
+    {
+      "id": "S05",
+      "group": "noon",
+      "prompt": "正午城市天台，白衬衫人物俯视街道，硬朗阴影，写实摄影",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "正午",
+        "colorTemp": "自然",
+        "lightQuality": "硬光",
+        "lightingPreset": "自然光",
+        "reason": "规则匹配: 正午语义"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n正午城市天台，白衬衫人物俯视街道，硬朗阴影，写实摄影\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBac"
+    },
+    {
+      "id": "S06",
+      "group": "portrait",
+      "prompt": "棚拍人像，伦勃朗布光，85mm，中景，肤色自然",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "lightingPreset": "伦勃朗",
+        "reason": "规则匹配: 伦勃朗布光"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n棚拍人像，伦勃朗布光，85mm，中景，肤色自然\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgr"
+    },
+    {
+      "id": "S07",
+      "group": "portrait",
+      "prompt": "时尚杂志封面女模，蝶形光，干净背景，特写镜头",
+      "modelEndpointAvailable": false,
+      "inferredReco": null,
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n时尚杂志封面女模，蝶形光，干净背景，特写镜头\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgro"
+    },
+    {
+      "id": "S08",
+      "group": "oblique",
+      "prompt": "废弃教室中的冲突对峙，45度斜角构图，压迫感强",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "cameraPreset": "45°斜角",
+        "reason": "规则匹配: 斜角视角"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n废弃教室中的冲突对峙，45度斜角构图，压迫感强\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgr"
+    },
+    {
+      "id": "S09",
+      "group": "bird",
+      "prompt": "鸟瞰古镇夜市，人群密集，灯笼暖光与冷色天空对比",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "夜晚",
+        "colorTemp": "冷蓝",
+        "lightQuality": "中性",
+        "lightingPreset": "侧光",
+        "cameraPreset": "鸟瞰",
+        "reason": "规则匹配: 夜晚语义 / 鸟瞰视角"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n鸟瞰古镇夜市，人群密集，灯笼暖光与冷色天空对比\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgr"
+    },
+    {
+      "id": "S10",
+      "group": "high",
+      "prompt": "高角度俯拍办公室，桌面文件杂乱，冷色调纪实风格",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "cameraPreset": "俯拍",
+        "reason": "规则匹配: 俯拍视角"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n高角度俯拍办公室，桌面文件杂乱，冷色调纪实风格\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgr"
+    },
+    {
+      "id": "S11",
+      "group": "low",
+      "prompt": "仰拍巨型机甲，阴天工业区背景，体积光，史诗感",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "cameraPreset": "仰拍",
+        "reason": "规则匹配: 仰拍视角"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n仰拍巨型机甲，阴天工业区背景，体积光，史诗感\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgro"
+    },
+    {
+      "id": "S12",
+      "group": "text",
+      "prompt": "招牌上写着“夜间营业”，需要可读文字，店门前人物驻足",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "夜晚",
+        "colorTemp": "冷蓝",
+        "lightQuality": "中性",
+        "lightingPreset": "侧光",
+        "reason": "规则匹配: 夜晚语义"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n招牌上写着“夜间营业”，需要可读文字，店门前人物驻足\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBac"
+    },
+    {
+      "id": "S13",
+      "group": "multi",
+      "prompt": "三人小队在雨中推进，前中后景层次清晰，镜头跟拍感",
+      "modelEndpointAvailable": false,
+      "inferredReco": null,
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n三人小队在雨中推进，前中后景层次清晰，镜头跟拍感\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackg"
+    },
+    {
+      "id": "S14",
+      "group": "multi",
+      "prompt": "双人对视，背景是燃烧的仓库，前景碎片飞溅，电影海报风",
+      "modelEndpointAvailable": false,
+      "inferredReco": null,
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n双人对视，背景是燃烧的仓库，前景碎片飞溅，电影海报风\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBac"
+    },
+    {
+      "id": "S15",
+      "group": "style",
+      "prompt": "二次元少女在夜色神社前，蓝紫霓虹，半写实动漫融合",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "夜晚",
+        "colorTemp": "冷蓝",
+        "lightQuality": "中性",
+        "lightingPreset": "侧光",
+        "reason": "规则匹配: 夜晚语义"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n二次元少女在夜色神社前，蓝紫霓虹，半写实动漫融合\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackg"
+    },
+    {
+      "id": "S16",
+      "group": "style",
+      "prompt": "照片级写实街拍，清晨雾气，自然肤色，低饱和电影调色",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "timeOfDay": "日出",
+        "colorTemp": "暖黄",
+        "lightQuality": "柔光",
+        "lightingPreset": "逆光",
+        "reason": "规则匹配: 日出语义"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n照片级写实街拍，清晨雾气，自然肤色，低饱和电影调色\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    },
+    {
+      "id": "S17",
+      "group": "detail",
+      "prompt": "微距拍摄机械手表，金属反射细节，极致清晰，黑色背景",
+      "modelEndpointAvailable": false,
+      "inferredReco": null,
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n微距拍摄机械手表，金属反射细节，极致清晰，黑色背景\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    },
+    {
+      "id": "S18",
+      "group": "detail",
+      "prompt": "极简主义客厅，白墙与木质家具，柔和自然光，安静氛围",
+      "modelEndpointAvailable": false,
+      "inferredReco": null,
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n极简主义客厅，白墙与木质家具，柔和自然光，安静氛围\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    }
+  ]
+}

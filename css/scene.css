@@ -43,6 +43,51 @@
   pointer-events: none;
 }
 
+.scene-axis-x {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 3px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.56rem;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scene-axis-y {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 0.56rem;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scene-axis-label {
+  position: absolute;
+  font-size: 0.56rem;
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scene-axis-label-x {
+  right: 6px;
+  top: 4px;
+}
+
+.scene-axis-label-y {
+  left: 6px;
+  top: 18px;
+}
+
 /* Center subject indicator */
 .scene-subject {
   position: absolute;
@@ -132,6 +177,20 @@
   cursor: grabbing;
 }
 
+.scene-drag-coords {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  color: #fff;
+  background: rgba(20, 16, 34, 0.85);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .scene-light[data-type="key"] {
   background: var(--color-candy-lemon);
   box-shadow: 0 0 10px rgba(255, 230, 109, 0.5);
@@ -209,6 +268,22 @@
   color: var(--color-text-tertiary);
   text-align: center;
   flex: 1;
+}
+
+.scene-coord-readout {
+  margin-top: 2px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 8px;
+}
+
+.scene-coord-readout span {
+  font-size: 0.62rem;
+  color: var(--color-text-secondary);
+  background: rgba(195, 166, 255, 0.08);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
 }
 
 /* ---- Scene Controls ---- */

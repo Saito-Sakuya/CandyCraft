@@ -7,17 +7,16 @@
 
 const STORAGE_KEYS = {
   mode: 'pc_api_mode',
-  managedModel: 'pc_model_managed',
   customBaseUrl: 'pc_custom_base_url',
   customApiKey: 'pc_custom_api_key',
   customModel: 'pc_custom_model',
 };
 
-const LEGACY_MODEL_KEY = 'pc_model';
-
 const LEGACY_STORAGE_KEYS = [
   'pc_api_base_url',
   'pc_api_key',
+  'pc_model',
+  'pc_model_managed',
 ];
 
 const API_PATH = '/api/chat';
@@ -36,43 +35,28 @@ function sanitizeText(value) {
   return String(value || '').trim();
 }
 
-function removeStorageKey(key) {
-  localStorage.removeItem(key);
-}
-
 function setStorageText(key, value) {
   if (value) {
     localStorage.setItem(key, value);
   } else {
-    removeStorageKey(key);
+    localStorage.removeItem(key);
   }
 }
 
 function migrateLegacyConfig() {
-  const legacyModel = sanitizeText(localStorage.getItem(LEGACY_MODEL_KEY));
-  const managedModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.managedModel));
-
-  if (legacyModel && !managedModel) {
-    localStorage.setItem(STORAGE_KEYS.managedModel, legacyModel);
-  }
-  if (legacyModel) {
-    localStorage.removeItem(LEGACY_MODEL_KEY);
-  }
-
   cleanupLegacyApiConfig();
 }
 
 function readStoredConfig() {
   migrateLegacyConfig();
+
   const mode = sanitizeMode(localStorage.getItem(STORAGE_KEYS.mode));
-  const managedModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.managedModel));
   const customBaseUrl = normalizeBaseUrl(localStorage.getItem(STORAGE_KEYS.customBaseUrl));
   const customApiKey = sanitizeText(localStorage.getItem(STORAGE_KEYS.customApiKey));
   const customModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.customModel));
 
   return {
     mode,
-    managedModel,
     customBaseUrl,
     customApiKey,
     customModel,
@@ -85,9 +69,6 @@ function mergeConfigWithOverride(current, overrideConfig) {
   }
 
   const mode = sanitizeMode(overrideConfig.mode ?? current.mode);
-  const managedModel = sanitizeText(
-    overrideConfig.managedModel ?? overrideConfig.model ?? current.managedModel
-  );
   const customBaseUrl = normalizeBaseUrl(
     overrideConfig.customBaseUrl ?? current.customBaseUrl
   );
@@ -95,12 +76,11 @@ function mergeConfigWithOverride(current, overrideConfig) {
     overrideConfig.customApiKey ?? current.customApiKey
   );
   const customModel = sanitizeText(
-    overrideConfig.customModel ?? current.customModel
+    overrideConfig.customModel ?? overrideConfig.model ?? current.customModel
   );
 
   return {
     mode,
-    managedModel,
     customBaseUrl,
     customApiKey,
     customModel,
@@ -108,10 +88,9 @@ function mergeConfigWithOverride(current, overrideConfig) {
 }
 
 function toPublicConfig(config) {
-  const activeModel = config.mode === MODE_CUSTOM ? config.customModel : config.managedModel;
   return {
     ...config,
-    model: activeModel,
+    model: config.mode === MODE_CUSTOM ? config.customModel : '',
   };
 }
 
@@ -141,9 +120,20 @@ function buildRequestTarget(config) {
     headers: {
       'Content-Type': 'application/json',
     },
-    model: config.managedModel,
     mode: MODE_MANAGED,
   };
+}
+
+function buildRequestBody(target, messages, stream, temperature) {
+  const body = {
+    messages,
+    stream,
+    temperature,
+  };
+  if (target.mode === MODE_CUSTOM) {
+    body.model = target.model;
+  }
+  return body;
 }
 
 /**
@@ -164,20 +154,12 @@ export function setApiConfig(nextConfig = {}) {
   if (config.mode !== undefined) {
     localStorage.setItem(STORAGE_KEYS.mode, sanitizeMode(config.mode));
   }
-
-  const managedModelInput = config.managedModel ?? config.model;
-  if (managedModelInput !== undefined) {
-    setStorageText(STORAGE_KEYS.managedModel, sanitizeText(managedModelInput));
-  }
-
   if (config.customBaseUrl !== undefined) {
     setStorageText(STORAGE_KEYS.customBaseUrl, normalizeBaseUrl(config.customBaseUrl));
   }
-
   if (config.customApiKey !== undefined) {
     setStorageText(STORAGE_KEYS.customApiKey, sanitizeText(config.customApiKey));
   }
-
   if (config.customModel !== undefined) {
     setStorageText(STORAGE_KEYS.customModel, sanitizeText(config.customModel));
   }
@@ -234,12 +216,12 @@ export async function testConnection(overrideConfig = null) {
     const res = await fetch(target.endpoint, {
       method: 'POST',
       headers: target.headers,
-      body: JSON.stringify({
-        model: target.model,
-        messages: [{ role: 'user', content: 'Hi' }],
-        stream: false,
-        temperature: 0,
-      }),
+      body: JSON.stringify(buildRequestBody(
+        target,
+        [{ role: 'user', content: 'Hi' }],
+        false,
+        0
+      )),
     });
 
     if (!res.ok) {
@@ -288,12 +270,7 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
     const response = await fetch(target.endpoint, {
       method: 'POST',
       headers: target.headers,
-      body: JSON.stringify({
-        model: target.model,
-        messages,
-        stream: true,
-        temperature: 0.7,
-      }),
+      body: JSON.stringify(buildRequestBody(target, messages, true, 0.7)),
       signal,
     });
 

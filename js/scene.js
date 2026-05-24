@@ -35,6 +35,12 @@ const LIGHT_META = {
 };
 
 let activeCameraPreset = null;
+const SCENE_AXIS_TICKS = [0, 25, 50, 75, 100];
+const VIEW_AXIS_HINTS = {
+  top: { x: '左右', y: '远近' },
+  front: { x: '左右', y: '高低' },
+  side: { x: '前后', y: '高低' },
+};
 
 /* ---- Constants ---- */
 const LIGHT_TYPES = [
@@ -256,6 +262,7 @@ function render() {
       <span>正视: ←左右→ ↑高↓低</span>
       <span>侧视: ←前后→ ↑高↓低</span>
     </div>
+    <div id="scene-coord-readout" class="scene-coord-readout"></div>
   `;
   containerEl.appendChild(legend);
 
@@ -264,6 +271,7 @@ function render() {
   placeCamera();
   placeLights();
   placeCameraDirectionLine();
+  updateSceneCoordReadout();
 
   const controls = el('div', 'scene-controls');
 
@@ -329,6 +337,7 @@ function createLightCard(key) {
     card.classList.toggle('light-card-off', !lights[key].on);
     updateSubjectLumens(key, card);
     updateLightIndicator(key);
+    updateSceneCoordReadout();
     markManualSceneChange();
   });
   const toggleSlider = el('span', 'light-toggle-slider');
@@ -479,10 +488,15 @@ function updateLightIndicator(key) {
 /* ============ Views ============ */
 
 function createView(label, viewId) {
+  const axisHint = VIEW_AXIS_HINTS[viewId] || VIEW_AXIS_HINTS.top;
   const view = el('div', 'scene-view');
   view.dataset.view = viewId;
   view.innerHTML = `
     <span class="scene-view-label">${label}</span>
+    <div class="scene-axis-x">${SCENE_AXIS_TICKS.map((tick) => `<span>${tick}</span>`).join('')}</div>
+    <div class="scene-axis-y">${SCENE_AXIS_TICKS.map((tick) => `<span>${tick}</span>`).join('')}</div>
+    <span class="scene-axis-label scene-axis-label-x">X: ${axisHint.x}</span>
+    <span class="scene-axis-label scene-axis-label-y">Y: ${axisHint.y}</span>
     <div class="scene-subject"></div>
   `;
   return view;
@@ -635,9 +649,13 @@ function addDraggableIndicator(viewEl, type, pctX, pctY, dataId, onMove, lightKe
       indicator.style.left = `${x}%`;
       indicator.style.top = `${y}%`;
       onMove(x, y);
+      setDragCoordTooltip(indicator, x, y);
+      updateSceneCoordReadout();
     };
     const up = () => {
       indicator.classList.remove('dragging');
+      clearDragCoordTooltip(indicator);
+      updateSceneCoordReadout();
       indicator.removeEventListener('pointermove', move);
       indicator.removeEventListener('pointerup', up);
     };
@@ -708,6 +726,39 @@ function updateCamDesc(desc) {
 function updateLightDesc(desc) {
   const dom = containerEl?.querySelector('#light-desc');
   if (dom) dom.textContent = desc;
+}
+
+function updateSceneCoordReadout() {
+  const dom = containerEl?.querySelector('#scene-coord-readout');
+  if (!dom) return;
+
+  const cameraTop = `相机俯视 X${Math.round(camera.x)} Y${Math.round(camera.y)}`;
+  const cameraSide = `相机侧视 X${Math.round(camera.y)} Y${Math.round(100 - cameraHeight)}`;
+  const lightRows = ['key', 'fill', 'back', 'hair'].map((key) => {
+    const light = lights[key];
+    const label = LIGHT_META[key].label;
+    if (!light.on) return `${label}: 关闭`;
+    return `${label}: X${Math.round(light.x)} Y${Math.round(light.y)}`;
+  });
+
+  dom.innerHTML = `
+    <span>${cameraTop}</span>
+    <span>${cameraSide}</span>
+    ${lightRows.map((row) => `<span>${row}</span>`).join('')}
+  `;
+}
+
+function setDragCoordTooltip(indicator, x, y) {
+  let tip = indicator.querySelector('.scene-drag-coords');
+  if (!tip) {
+    tip = el('span', 'scene-drag-coords');
+    indicator.appendChild(tip);
+  }
+  tip.textContent = `X:${Math.round(x)} Y:${Math.round(y)}`;
+}
+
+function clearDragCoordTooltip(indicator) {
+  indicator.querySelector('.scene-drag-coords')?.remove();
 }
 
 function createOptionRow(options, activeValue, onSelect, cssClass) {

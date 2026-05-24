@@ -1,7 +1,7 @@
 /**
  * settings.js — Settings panel management
  * Dual mode:
- * - managed: /api/chat proxy, model only
+ * - managed: /api/chat proxy, backend controls model
  * - custom: browser direct with baseUrl/apiKey/model
  */
 
@@ -13,7 +13,6 @@ let overlayEl = null;
 let modeRadios = [];
 let managedSectionEl = null;
 let customSectionEl = null;
-let managedModelInput = null;
 let customBaseUrlInput = null;
 let customApiKeyInput = null;
 let customModelInput = null;
@@ -36,7 +35,6 @@ export function initSettings() {
   modeRadios = Array.from(document.querySelectorAll('input[name="api-mode"]'));
   managedSectionEl = document.getElementById('managed-config-section');
   customSectionEl = document.getElementById('custom-config-section');
-  managedModelInput = document.getElementById('managed-model-name');
   customBaseUrlInput = document.getElementById('custom-api-base-url');
   customApiKeyInput = document.getElementById('custom-api-key');
   customModelInput = document.getElementById('custom-model-name');
@@ -117,7 +115,6 @@ function setInitialValues(config) {
     radio.checked = radio.value === mode;
   }
 
-  if (managedModelInput) managedModelInput.value = config.managedModel || '';
   if (customBaseUrlInput) customBaseUrlInput.value = config.customBaseUrl || '';
   if (customApiKeyInput) customApiKeyInput.value = config.customApiKey || '';
   if (customModelInput) customModelInput.value = config.customModel || '';
@@ -126,7 +123,6 @@ function setInitialValues(config) {
 function collectDraftConfig() {
   return {
     mode: getSelectedMode(),
-    managedModel: managedModelInput?.value.trim() || '',
     customBaseUrl: customBaseUrlInput?.value.trim() || '',
     customApiKey: customApiKeyInput?.value.trim() || '',
     customModel: customModelInput?.value.trim() || '',
