@@ -4,11 +4,13 @@
  * Optimization incorporates composition, character layout, camera, and lighting.
  */
 
+import { normalizeSceneRecommendation } from './scene-recommendation.js';
+
 /* ---- Analysis Phase System Prompt (v3) ---- */
 const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾问。
 用户会给你一段文生图提示词，请你分析该提示词的特点和可优化方向。
 
-请返回一个 JSON 对象（不是数组），包含以下三个字段：
+请返回一个 JSON 对象（不是数组），包含以下字段：
 
 1. "dimensions": 6~8 个可调节的优化维度数组，每个维度包含：
    - name: 维度名称（简短，2-4个字，如"画面细节""光影层次""色调氛围""构图张力""材质表现""叙事深度""风格强度""氛围渲染"）
@@ -39,6 +41,14 @@ const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾
    - name: 方案名称（2-4个字，如"电影海报""水彩插画""极简美学"）
    - description: 一句话说明该方案的风格取向
    - values: 一个对象，key 是维度名称，value 是该方案下的推荐值（0-100）
+
+4. "sceneRecommendation"（可选）:
+   - timeOfDay: "蓝调" | "日出" | "正午" | "黄金" | "夜晚"
+   - lightingPreset: "自然光" | "伦勃朗" | "蝶形光" | "侧光" | "逆光"
+   - colorTemp: "冷蓝" | "自然" | "暖黄" | "金橙"
+   - lightQuality: "硬光" | "中性" | "柔光"
+   - cameraPreset: "平视" | "俯拍" | "仰拍" | "鸟瞰" | "45°斜角"
+   - reason: 简短理由（可选）
 
 注意：
 1. 维度要针对该提示词的具体内容来设定，不要用通用模板
@@ -306,7 +316,7 @@ ${sceneDesc}`;
  * Now expects a JSON object with { dimensions, characters, presets }
  * Falls back to v1 array format for backward compatibility
  * @param {string} text — raw AI response
- * @returns {{ dimensions: Array, characters: Array, presets: Array } | null}
+ * @returns {{ dimensions: Array, elements: Array|null, characters: Array, presets: Array, sceneRecommendation: Object|null } | null}
  */
 export function parseAnalysisResponse(text) {
   if (!text || typeof text !== 'string') return null;
@@ -349,7 +359,7 @@ export function parseAnalysisResponse(text) {
   // v1 backward compatibility: if result is an array, treat as dimensions only
   if (Array.isArray(parsed)) {
     const dims = normalizeDimensions(parsed);
-    return dims ? { dimensions: dims, characters: [], presets: [] } : null;
+    return dims ? { dimensions: dims, elements: null, characters: [], presets: [], sceneRecommendation: null } : null;
   }
 
   // v2/v3 object format
@@ -362,8 +372,9 @@ export function parseAnalysisResponse(text) {
     const elements = parsed.elements || null;
     const characters = normalizeCharacters(parsed.characters || []);
     const presets = normalizePresets(parsed.presets || [], dimensions);
+    const sceneRecommendation = normalizeSceneRecommendation(parsed.sceneRecommendation);
 
-    return { dimensions, elements, characters, presets };
+    return { dimensions, elements, characters, presets, sceneRecommendation };
   }
 
   return null;
