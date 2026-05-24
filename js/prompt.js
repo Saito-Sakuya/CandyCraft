@@ -332,15 +332,18 @@ export function parseAnalysisResponse(text) {
     return dims ? { dimensions: dims, characters: [], presets: [] } : null;
   }
 
-  // v2 object format
+  // v2/v3 object format
   if (typeof parsed === 'object') {
     const dimensions = normalizeDimensions(parsed.dimensions);
     if (!dimensions) return null;
 
+    // v3: elements array (characters + objects)
+    // v2 fallback: characters array
+    const elements = parsed.elements || null;
     const characters = normalizeCharacters(parsed.characters || []);
     const presets = normalizePresets(parsed.presets || [], dimensions);
 
-    return { dimensions, characters, presets };
+    return { dimensions, elements, characters, presets };
   }
 
   return null;

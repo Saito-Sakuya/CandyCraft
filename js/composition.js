@@ -18,12 +18,10 @@ const RATIOS = [
 ];
 
 const RESOLUTIONS = [
-  { value: '',           label: '自动' },
-  { value: '512×512',    label: '512' },
-  { value: '768×768',    label: '768' },
-  { value: '1024×1024',  label: '1024' },
-  { value: '1024×1536',  label: '1024×1536' },
-  { value: '1536×1024',  label: '1536×1024' },
+  { value: '',       label: '不设置' },
+  { value: '1K',     label: '1K' },
+  { value: '2K',     label: '2K' },
+  { value: '4K',     label: '4K' },
 ];
 
 /**

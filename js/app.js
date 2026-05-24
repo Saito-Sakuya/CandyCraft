@@ -181,19 +181,41 @@ async function handleAnalyze() {
     }
 
     state.dimensions = result.dimensions;
-    // v3: merge characters + objects into elements (backward compat)
-    if (result.elements) {
-      state.elements = result.elements;
+    // v3: AI returns elements[] directly
+    if (result.elements && result.elements.length > 0) {
+      state.elements = result.elements.map((e, i) => ({
+        id: e.id || `elem_${i + 1}`,
+        type: e.type || 'character',
+        layer: e.layer || 'foreground',
+        name: e.name || `元素${i + 1}`,
+        description: e.description || '',
+        prompt: e.prompt || '',
+        role: e.role || '',
+        x: e.position?.x ?? e.x ?? 50,
+        y: e.position?.y ?? e.y ?? 50,
+        w: e.size?.w ?? e.w ?? 18,
+        h: e.size?.h ?? e.h ?? 28,
+        zIndex: i,
+        focusPoint: e.focusPoint || '',
+        selected: false,
+      }));
     } else {
-      // Old format: characters only → map to elements
-      state.elements = (result.characters || []).map(c => ({
-        ...c,
+      // v2 fallback: characters only → map to elements
+      state.elements = (result.characters || []).map((c, i) => ({
+        id: c.id || `char_${i + 1}`,
         type: 'character',
-        layer: c.role === '背景' ? 'background' : 'foreground',
+        layer: c.role === '背景' || c.role === '背景景物' ? 'background' : 'foreground',
+        name: c.name || `角色${i + 1}`,
+        description: c.description || '',
+        prompt: '',
+        role: c.role || '',
         x: c.position?.x ?? c.x ?? 50,
         y: c.position?.y ?? c.y ?? 50,
         w: c.size?.w ?? c.w ?? 18,
         h: c.size?.h ?? c.h ?? 28,
+        zIndex: i,
+        focusPoint: '',
+        selected: false,
       }));
     }
     state.presets = result.presets || [];
