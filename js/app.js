@@ -12,11 +12,17 @@ import { renderSliders, getSliderValues, resetSliders, setValues, registerManual
 import { renderPresets, clearActivePreset, destroyPresets } from './presets.js';
 import { initComposition, getAspectRatio, getCompositionData } from './composition.js';
 import { initCanvas, updateCanvasAspect, getCanvasData, addElement, destroyCanvas } from './canvas.js';
-import { initScene, getSceneData, destroyScene } from './scene.js';
+import { initScene, getSceneData, destroyScene, getSceneRecommendationState, hasManualSceneChanges, applySceneRecommendation } from './scene.js';
 import { initStyleToggle, getStyle } from './style-toggle.js';
 import { initSettings } from './settings.js';
 import { initHistory, addRecord, onSelectRecord } from './history.js';
 import { initTheme } from './theme.js';
+import {
+  inferSceneRecommendationFromPrompt,
+  mergeSceneRecommendations,
+  hasSceneRecommendationDiff,
+  formatSceneRecommendationDiffText,
+} from './scene-recommendation.js';
 
 /* ============ State ============ */
 
@@ -60,6 +66,11 @@ function cacheDom() {
     loadingSection:   $('loading-section'),
     loadingText:      $('loading-text'),
     guideCards:       $('guide-cards'),
+    sceneConfirmOverlay: $('scene-confirm-overlay'),
+    sceneConfirmSummary: $('scene-confirm-summary'),
+    sceneConfirmReason: $('scene-confirm-reason'),
+    btnSceneConfirmApply: $('scene-confirm-apply'),
+    btnSceneConfirmKeep: $('scene-confirm-keep'),
   };
 }
 
@@ -79,10 +90,17 @@ function init() {
     // Style change doesn't require immediate action, used during analysis/optimization
   });
 
-  // Check API config
+  // Startup config hint
   const config = getApiConfig();
-  if (!config.apiKey || !config.baseUrl) {
-    setTimeout(() => showToast('请先点击左上角齿轮图标配置 API', 'info'), 600);
+  if (config.mode === 'custom') {
+    const missing = getMissingCustomApiFields(config);
+    if (missing.length > 0) {
+      setTimeout(() => {
+        showToast(`当前为用户自定义模式，请先填写：${missing.join(' / ')}`, 'info');
+      }, 600);
+    }
+  } else if (!config.managedModel) {
+    setTimeout(() => showToast('可在设置中填写模型名称；留空将使用服务端默认模型', 'info'), 600);
   }
 
   // Bind main events
@@ -127,12 +145,7 @@ async function handleAnalyze() {
     showToast('请输入提示词', 'error');
     return;
   }
-
-  const config = getApiConfig();
-  if (!config.apiKey || !config.baseUrl) {
-    showToast('请先配置 API 地址和 Key', 'error');
-    return;
-  }
+  if (!ensureApiReadyForRun()) return;
 
   // Debounce: prevent double-click
   if (state.isAnalyzing) {
@@ -222,6 +235,14 @@ async function handleAnalyze() {
     }
     state.presets = result.presets || [];
 
+    const currentSceneState = getSceneRecommendationState();
+    const ruleSceneRecommendation = inferSceneRecommendationFromPrompt(prompt);
+    const finalSceneRecommendation = mergeSceneRecommendations({
+      current: currentSceneState,
+      rule: ruleSceneRecommendation,
+      ai: result.sceneRecommendation || null,
+    });
+
     // Render presets
     if (state.presets.length > 0) {
       renderPresets('presets-container', state.presets, handlePresetSelect);
@@ -244,6 +265,10 @@ async function handleAnalyze() {
     showEl(els.sceneSection);
 
     hideLoading();
+
+    if (hasSceneRecommendationDiff(currentSceneState, finalSceneRecommendation)) {
+      await applySceneRecommendationWithPolicy(currentSceneState, finalSceneRecommendation);
+    }
     showToast('分析完成，调节参数后点击优化', 'success');
 
   } catch (err) {
@@ -280,12 +305,7 @@ async function handleOptimize() {
     showToast('请先分析提示词', 'error');
     return;
   }
-
-  const config = getApiConfig();
-  if (!config.apiKey || !config.baseUrl) {
-    showToast('请先配置 API 地址和 Key', 'error');
-    return;
-  }
+  if (!ensureApiReadyForRun()) return;
 
   state.isOptimizing = true;
   showLoading('正在优化提示词...');
@@ -403,7 +423,90 @@ function handleHistorySelect(record) {
   }
 }
 
+/* ============ Scene Recommendation Policy ============ */
+
+async function applySceneRecommendationWithPolicy(currentSceneState, nextRecommendation) {
+  const diffText = formatSceneRecommendationDiffText(currentSceneState, nextRecommendation);
+
+  if (hasManualSceneChanges()) {
+    const shouldApply = await openSceneRecommendationConfirm(diffText, nextRecommendation?.reason || '');
+    if (shouldApply) {
+      applySceneRecommendation(nextRecommendation, { source: 'user-confirmed' });
+      showToast('已应用新的相机与布光建议', 'success');
+    } else {
+      showToast('已保留你当前的相机与布光设置', 'info');
+    }
+    return;
+  }
+
+  applySceneRecommendation(nextRecommendation, { source: 'auto' });
+  showToast(`已自动调整场景：${diffText}`, 'info');
+}
+
+function openSceneRecommendationConfirm(diffText, reasonText) {
+  return new Promise((resolve) => {
+    const overlay = els.sceneConfirmOverlay;
+    const summary = els.sceneConfirmSummary;
+    const reason = els.sceneConfirmReason;
+    const btnApply = els.btnSceneConfirmApply;
+    const btnKeep = els.btnSceneConfirmKeep;
+
+    if (!overlay || !summary || !reason || !btnApply || !btnKeep) {
+      resolve(false);
+      return;
+    }
+
+    summary.textContent = diffText || '检测到新的场景建议。';
+    reason.textContent = reasonText ? `建议依据：${reasonText}` : '建议依据：提示词语义与场景规则。';
+
+    const cleanup = () => {
+      overlay.classList.remove('open');
+      btnApply.removeEventListener('click', onApply);
+      btnKeep.removeEventListener('click', onKeep);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKeydown);
+    };
+
+    const finalize = (value) => {
+      cleanup();
+      resolve(value);
+    };
+
+    const onApply = () => finalize(true);
+    const onKeep = () => finalize(false);
+    const onOverlayClick = (event) => {
+      if (event.target === overlay) finalize(false);
+    };
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') finalize(false);
+    };
+
+    btnApply.addEventListener('click', onApply);
+    btnKeep.addEventListener('click', onKeep);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKeydown);
+    overlay.classList.add('open');
+  });
+}
+
 /* ============ UI Helpers ============ */
+
+function getMissingCustomApiFields(config) {
+  if (config.mode !== 'custom') return [];
+  const missing = [];
+  if (!config.customBaseUrl) missing.push('Base URL');
+  if (!config.customApiKey) missing.push('API Key');
+  if (!config.customModel) missing.push('Model');
+  return missing;
+}
+
+function ensureApiReadyForRun() {
+  const config = getApiConfig();
+  const missing = getMissingCustomApiFields(config);
+  if (missing.length === 0) return true;
+  showToast(`自定义模式缺少必填项：${missing.join(' / ')}，请先在设置中补全`, 'error');
+  return false;
+}
 
 function showLoading(text) {
   if (els.loadingText) els.loadingText.textContent = text;

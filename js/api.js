@@ -1,73 +1,262 @@
 /**
  * api.js — AI API communication layer
- * Streaming chat completions via OpenAI-compatible API
+ * Dual-mode transport:
+ * - managed: same-origin Cloudflare Pages Function proxy (/api/chat)
+ * - custom: browser direct call to customBaseUrl/chat/completions
  */
 
-import { showToast } from './utils.js';
-
 const STORAGE_KEYS = {
-  baseUrl: 'pc_api_base_url',
-  apiKey: 'pc_api_key',
-  model: 'pc_model',
+  mode: 'pc_api_mode',
+  managedModel: 'pc_model_managed',
+  customBaseUrl: 'pc_custom_base_url',
+  customApiKey: 'pc_custom_api_key',
+  customModel: 'pc_custom_model',
 };
 
-const DEFAULTS = {
-  baseUrl: '',
-  apiKey: '',
-  model: 'gpt-4o',
-};
+const LEGACY_MODEL_KEY = 'pc_model';
+
+const LEGACY_STORAGE_KEYS = [
+  'pc_api_base_url',
+  'pc_api_key',
+];
+
+const API_PATH = '/api/chat';
+const MODE_MANAGED = 'managed';
+const MODE_CUSTOM = 'custom';
+
+function sanitizeMode(value) {
+  return value === MODE_CUSTOM ? MODE_CUSTOM : MODE_MANAGED;
+}
+
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function sanitizeText(value) {
+  return String(value || '').trim();
+}
+
+function removeStorageKey(key) {
+  localStorage.removeItem(key);
+}
+
+function setStorageText(key, value) {
+  if (value) {
+    localStorage.setItem(key, value);
+  } else {
+    removeStorageKey(key);
+  }
+}
+
+function migrateLegacyConfig() {
+  const legacyModel = sanitizeText(localStorage.getItem(LEGACY_MODEL_KEY));
+  const managedModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.managedModel));
+
+  if (legacyModel && !managedModel) {
+    localStorage.setItem(STORAGE_KEYS.managedModel, legacyModel);
+  }
+  if (legacyModel) {
+    localStorage.removeItem(LEGACY_MODEL_KEY);
+  }
+
+  cleanupLegacyApiConfig();
+}
+
+function readStoredConfig() {
+  migrateLegacyConfig();
+  const mode = sanitizeMode(localStorage.getItem(STORAGE_KEYS.mode));
+  const managedModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.managedModel));
+  const customBaseUrl = normalizeBaseUrl(localStorage.getItem(STORAGE_KEYS.customBaseUrl));
+  const customApiKey = sanitizeText(localStorage.getItem(STORAGE_KEYS.customApiKey));
+  const customModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.customModel));
+
+  return {
+    mode,
+    managedModel,
+    customBaseUrl,
+    customApiKey,
+    customModel,
+  };
+}
+
+function mergeConfigWithOverride(current, overrideConfig) {
+  if (!overrideConfig || typeof overrideConfig !== 'object') {
+    return current;
+  }
+
+  const mode = sanitizeMode(overrideConfig.mode ?? current.mode);
+  const managedModel = sanitizeText(
+    overrideConfig.managedModel ?? overrideConfig.model ?? current.managedModel
+  );
+  const customBaseUrl = normalizeBaseUrl(
+    overrideConfig.customBaseUrl ?? current.customBaseUrl
+  );
+  const customApiKey = sanitizeText(
+    overrideConfig.customApiKey ?? current.customApiKey
+  );
+  const customModel = sanitizeText(
+    overrideConfig.customModel ?? current.customModel
+  );
+
+  return {
+    mode,
+    managedModel,
+    customBaseUrl,
+    customApiKey,
+    customModel,
+  };
+}
+
+function toPublicConfig(config) {
+  const activeModel = config.mode === MODE_CUSTOM ? config.customModel : config.managedModel;
+  return {
+    ...config,
+    model: activeModel,
+  };
+}
+
+function getRequiredCustomFields(config) {
+  const missing = [];
+  if (!config.customBaseUrl) missing.push('Base URL');
+  if (!config.customApiKey) missing.push('API Key');
+  if (!config.customModel) missing.push('Model');
+  return missing;
+}
+
+function buildRequestTarget(config) {
+  if (config.mode === MODE_CUSTOM) {
+    return {
+      endpoint: `${config.customBaseUrl}/chat/completions`,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.customApiKey}`,
+      },
+      model: config.customModel,
+      mode: MODE_CUSTOM,
+    };
+  }
+
+  return {
+    endpoint: API_PATH,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    model: config.managedModel,
+    mode: MODE_MANAGED,
+  };
+}
 
 /**
  * Read API configuration from localStorage
  */
 export function getApiConfig() {
-  return {
-    baseUrl: localStorage.getItem(STORAGE_KEYS.baseUrl) || DEFAULTS.baseUrl,
-    apiKey: localStorage.getItem(STORAGE_KEYS.apiKey) || DEFAULTS.apiKey,
-    model: localStorage.getItem(STORAGE_KEYS.model) || DEFAULTS.model,
-  };
+  const stored = readStoredConfig();
+  return toPublicConfig(stored);
 }
 
 /**
  * Save API configuration to localStorage
  */
-export function setApiConfig({ baseUrl, apiKey, model }) {
-  if (baseUrl !== undefined) localStorage.setItem(STORAGE_KEYS.baseUrl, baseUrl.replace(/\/+$/, ''));
-  if (apiKey !== undefined) localStorage.setItem(STORAGE_KEYS.apiKey, apiKey);
-  if (model !== undefined) localStorage.setItem(STORAGE_KEYS.model, model);
+export function setApiConfig(nextConfig = {}) {
+  migrateLegacyConfig();
+  const config = (nextConfig && typeof nextConfig === 'object') ? nextConfig : {};
+
+  if (config.mode !== undefined) {
+    localStorage.setItem(STORAGE_KEYS.mode, sanitizeMode(config.mode));
+  }
+
+  const managedModelInput = config.managedModel ?? config.model;
+  if (managedModelInput !== undefined) {
+    setStorageText(STORAGE_KEYS.managedModel, sanitizeText(managedModelInput));
+  }
+
+  if (config.customBaseUrl !== undefined) {
+    setStorageText(STORAGE_KEYS.customBaseUrl, normalizeBaseUrl(config.customBaseUrl));
+  }
+
+  if (config.customApiKey !== undefined) {
+    setStorageText(STORAGE_KEYS.customApiKey, sanitizeText(config.customApiKey));
+  }
+
+  if (config.customModel !== undefined) {
+    setStorageText(STORAGE_KEYS.customModel, sanitizeText(config.customModel));
+  }
 }
 
 /**
- * Test API connection with a simple request
- * @returns {{ success: boolean, message: string }}
+ * Remove legacy browser-side secrets/config keys
  */
-export async function testConnection() {
-  const { baseUrl, apiKey, model } = getApiConfig();
-  if (!baseUrl || !apiKey) {
-    return { success: false, message: '请先填写 API 地址和 Key' };
+export function cleanupLegacyApiConfig() {
+  for (const key of LEGACY_STORAGE_KEYS) {
+    localStorage.removeItem(key);
+  }
+}
+
+function getErrorMessage(text, fallback) {
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed?.error?.message || fallback;
+  } catch {
+    return text || fallback;
+  }
+}
+
+function getCustomModeHint(err) {
+  const message = String(err?.message || '');
+  const maybeNetwork = err instanceof TypeError || /Failed to fetch|NetworkError/i.test(message);
+  if (!maybeNetwork) return null;
+
+  return '自定义端点连接失败：该端点可能不支持浏览器直连，或未放开 CORS。请检查 Base URL、跨域配置与 HTTPS 证书。';
+}
+
+/**
+ * Test connection with a tiny request
+ * @param {Object | null} [overrideConfig]
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export async function testConnection(overrideConfig = null) {
+  const current = readStoredConfig();
+  const config = mergeConfigWithOverride(current, overrideConfig);
+  const target = buildRequestTarget(config);
+
+  if (config.mode === MODE_CUSTOM) {
+    const missing = getRequiredCustomFields(config);
+    if (missing.length > 0) {
+      return {
+        success: false,
+        message: `请先填写自定义模式必填项：${missing.join(' / ')}`,
+      };
+    }
   }
 
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+    const res = await fetch(target.endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: target.headers,
       body: JSON.stringify({
-        model,
+        model: target.model,
         messages: [{ role: 'user', content: 'Hi' }],
-        max_tokens: 5,
+        stream: false,
+        temperature: 0,
       }),
     });
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
-      return { success: false, message: `HTTP ${res.status}: ${errBody.slice(0, 120)}` };
+      const message = getErrorMessage(errBody, `HTTP ${res.status}`);
+      return { success: false, message: `连接失败: ${message}` };
     }
 
-    return { success: true, message: '连接成功' };
+    if (config.mode === MODE_CUSTOM) {
+      return { success: true, message: '连接成功（已直连自定义端点）' };
+    }
+    return { success: true, message: '连接成功（已通过同源代理）' };
   } catch (err) {
+    if (config.mode === MODE_CUSTOM) {
+      const hint = getCustomModeHint(err);
+      if (hint) return { success: false, message: hint };
+    }
     return { success: false, message: `连接失败: ${err.message}` };
   }
 }
@@ -77,31 +266,30 @@ export async function testConnection() {
  *
  * @param {Array<{role:string, content:string}>} messages
  * @param {Object} callbacks
- * @param {(chunk: string) => void} callbacks.onChunk — called with each content fragment
- * @param {(fullText: string) => void} callbacks.onDone — called when stream finishes
- * @param {(error: Error) => void} callbacks.onError — called on error
- * @param {AbortSignal} [callbacks.signal] — optional abort signal
+ * @param {(chunk: string) => void} callbacks.onChunk
+ * @param {(fullText: string) => void} callbacks.onDone
+ * @param {(error: Error) => void} callbacks.onError
+ * @param {AbortSignal} [callbacks.signal]
  */
 export async function streamChat(messages, { onChunk, onDone, onError, signal }) {
-  const { baseUrl, apiKey, model } = getApiConfig();
+  const config = readStoredConfig();
+  const target = buildRequestTarget(config);
 
-  if (!baseUrl || !apiKey) {
-    const err = new Error('请先在设置中配置 API 地址和 Key');
-    onError?.(err);
-    throw err;
+  if (target.mode === MODE_CUSTOM) {
+    const missing = getRequiredCustomFields(config);
+    if (missing.length > 0) {
+      throw new Error(`自定义模式缺少必填项：${missing.join(' / ')}`);
+    }
   }
 
   let fullText = '';
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(target.endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: target.headers,
       body: JSON.stringify({
-        model,
+        model: target.model,
         messages,
         stream: true,
         temperature: 0.7,
@@ -111,10 +299,15 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
 
     if (!response.ok) {
       const errBody = await response.text().catch(() => '');
-      throw new Error(`API 请求失败 (${response.status}): ${errBody.slice(0, 200)}`);
+      const message = getErrorMessage(errBody, `API 请求失败 (${response.status})`);
+      throw new Error(message);
     }
 
-    const reader = response.body.getReader();
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('响应未返回可读取的流数据');
+    }
+
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
 
@@ -124,8 +317,6 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-
-      // Keep the last potentially incomplete line in the buffer
       buffer = lines.pop() || '';
 
       for (const line of lines) {
@@ -143,12 +334,11 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
             onChunk?.(content);
           }
         } catch {
-          // Skip malformed JSON chunks — they happen at boundaries
+          // Skip malformed JSON chunks
         }
       }
     }
 
-    // Process any remaining buffer
     if (buffer.trim()) {
       const remaining = buffer.trim();
       if (remaining.startsWith('data:')) {
@@ -161,7 +351,9 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
               fullText += content;
               onChunk?.(content);
             }
-          } catch { /* ignore */ }
+          } catch {
+            // Ignore tail parse errors
+          }
         }
       }
     }
@@ -169,9 +361,16 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
     onDone?.(fullText);
   } catch (err) {
     if (err.name === 'AbortError') {
-      // User cancelled — still call onDone with whatever we collected
       onDone?.(fullText);
       return;
+    }
+    if (target.mode === MODE_CUSTOM) {
+      const hint = getCustomModeHint(err);
+      if (hint) {
+        const wrapped = new Error(hint);
+        onError?.(wrapped);
+        throw wrapped;
+      }
     }
     onError?.(err);
     throw err;
