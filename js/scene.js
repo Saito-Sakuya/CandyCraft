@@ -421,6 +421,18 @@ function updateLightIndicator(key) {
   }
 }
 
+/* ============ Views ============ */
+
+function createView(label, viewId) {
+  const view = el('div', 'scene-view');
+  view.dataset.view = viewId;
+  view.innerHTML = `
+    <span class="scene-view-label">${label}</span>
+    <div class="scene-subject"></div>
+  `;
+  return view;
+}
+
 /* ============ Camera ============ */
 
 function placeCamera() {
