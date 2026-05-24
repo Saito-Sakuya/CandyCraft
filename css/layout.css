@@ -76,9 +76,9 @@
 /* ---- Main Content Grid (3 columns) ---- */
 .app-main {
   display: grid;
-  grid-template-columns: 320px 1fr 360px;
+  grid-template-columns: 300px 1fr 320px;
   gap: var(--space-lg);
-  max-width: 1500px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: var(--space-lg) var(--space-xl);
   position: relative;

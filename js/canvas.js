@@ -18,6 +18,7 @@ let linkFromId = null;
 let editPopupEl = null;
 let dragState = null;
 let outsideHandler = null;  // click-outside listener ref
+let layerFilter = 'all';   // 'all' | 'foreground' | 'background'
 
 const LINK_TYPES = [
   { type: 'same-plane', label: '同一平面' },
@@ -70,11 +71,22 @@ export function initCanvas(boardId, layerPanelId, data) {
 }
 
 /**
- * Update board aspect ratio
+ * Update board aspect ratio — supports any W:H ratio string
  */
 export function updateCanvasAspect(ratio) {
   if (!boardEl) return;
   boardEl.setAttribute('data-ratio', ratio);
+  // Parse ratio and set CSS aspect-ratio dynamically
+  const parts = ratio.split(':').map(Number);
+  if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+    boardEl.style.aspectRatio = `${parts[0]} / ${parts[1]}`;
+    // Limit height for very tall portraits
+    if (parts[1] > parts[0]) {
+      boardEl.style.maxHeight = '600px';
+    } else {
+      boardEl.style.maxHeight = '';
+    }
+  }
 }
 
 /**
@@ -150,7 +162,13 @@ function render() {
 
   // Sort by zIndex and render
   const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
-  sorted.forEach(elem => renderElementBox(elem));
+  sorted.forEach(elem => {
+    const box = renderElementBox(elem);
+    // Apply layer filter visibility
+    if (layerFilter !== 'all' && elem.layer !== layerFilter) {
+      box.classList.add('layer-hidden');
+    }
+  });
 
   // Link lines
   renderLinkLines();
@@ -217,6 +235,7 @@ function renderElementBox(elem) {
   });
 
   boardEl.appendChild(box);
+  return box;
 }
 
 /* ============ Layer Panel ============ */
@@ -224,6 +243,19 @@ function renderElementBox(elem) {
 function renderLayerPanel() {
   if (!layerPanelEl) return;
   layerPanelEl.innerHTML = '';
+
+  // Layer filter buttons
+  const filterRow = ce('div', 'layer-filter-row');
+  ['all', 'foreground', 'background'].forEach(f => {
+    const btn = ce('button', `layer-filter-btn ${layerFilter === f ? 'active' : ''}`);
+    btn.textContent = f === 'all' ? '全部' : f === 'foreground' ? '前景' : '后景';
+    btn.addEventListener('click', () => {
+      layerFilter = f;
+      render();
+    });
+    filterRow.appendChild(btn);
+  });
+  layerPanelEl.appendChild(filterRow);
 
   // Header with add buttons
   const header = ce('div', 'layer-header');
@@ -350,8 +382,10 @@ function renderLayerPanel() {
       if (!fromEl || !toEl) return;
 
       const item = ce('div', 'layer-link-item');
+      const descHtml = link.description ? `<div class="layer-link-desc">${esc(trunc(link.description, 20))}</div>` : '';
       item.innerHTML = `
         <span>${esc(trunc(fromEl.name, 5))} — ${esc(link.label || link.type)} — ${esc(trunc(toEl.name, 5))}</span>
+        ${descHtml}
         <button class="layer-link-del" title="删除链接">\u00D7</button>
       `;
       item.querySelector('.layer-link-del').addEventListener('click', () => {
@@ -512,6 +546,10 @@ function openLinkTypePicker(fromId, toId) {
     <div class="popup-options">
       ${LINK_TYPES.map(lt => `<button class="popup-opt" data-type="${lt.type}">${lt.label}</button>`).join('')}
     </div>
+    <div class="popup-field" style="margin-top:8px">
+      <label style="font-size:0.8rem;color:var(--color-text-secondary)">关系说明（可选）</label>
+      <input type="text" class="popup-input link-desc-input" placeholder="如: 两人在雨中对视" style="width:100%;margin-top:4px">
+    </div>
   `;
 
   popup.querySelectorAll('.popup-opt').forEach(btn => {
@@ -520,16 +558,19 @@ function openLinkTypePicker(fromId, toId) {
       let label = LINK_TYPES.find(t => t.type === type)?.label || type;
 
       if (type === 'custom') {
-        const custom = prompt('输入自定义关系:');
+        const custom = window.prompt('输入自定义关系:');
         if (!custom) { closeAllPopups(); linkMode = false; linkFromId = null; render(); return; }
         label = custom;
       }
+
+      const description = popup.querySelector('.link-desc-input')?.value?.trim() || '';
 
       links.push({
         fromId,
         toId,
         type,
         label,
+        description,
         color: LINK_COLORS[links.length % LINK_COLORS.length],
       });
 

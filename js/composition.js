@@ -1,78 +1,126 @@
 /**
- * composition.js — Aspect ratio selector
- * Three options: landscape (16:9), portrait (9:16), square (1:1)
+ * composition.js — Aspect Ratio / Resolution / Orientation Selector (v3)
+ * Controls: ratio presets, orientation flip, resolution presets
  */
 
 let currentRatio = '16:9';
+let currentOrientation = 'landscape';
+let currentResolution = '';
 let changeCallback = null;
 let containerEl = null;
 
 const RATIOS = [
-  { value: '16:9', label: '横向', icon: 'comp-icon-landscape' },
-  { value: '9:16', label: '纵向', icon: 'comp-icon-portrait' },
-  { value: '1:1',  label: '方形', icon: 'comp-icon-square' },
+  { value: '1:1',  label: '1:1' },
+  { value: '4:3',  label: '4:3' },
+  { value: '3:2',  label: '3:2' },
+  { value: '16:9', label: '16:9' },
+  { value: '21:9', label: '21:9' },
+];
+
+const RESOLUTIONS = [
+  { value: '',           label: '自动' },
+  { value: '512×512',    label: '512' },
+  { value: '768×768',    label: '768' },
+  { value: '1024×1024',  label: '1024' },
+  { value: '1024×1536',  label: '1024×1536' },
+  { value: '1536×1024',  label: '1536×1024' },
 ];
 
 /**
  * Initialize the composition selector
- * @param {string} containerId
- * @param {(ratio: string) => void} onChange — called with the selected ratio string
  */
 export function initComposition(containerId, onChange) {
   containerEl = document.getElementById(containerId);
   if (!containerEl) return;
 
   changeCallback = onChange;
+  render();
+}
+
+function render() {
+  if (!containerEl) return;
   containerEl.innerHTML = '';
 
-  RATIOS.forEach((r) => {
-    const btn = document.createElement('button');
-    btn.className = `comp-option ${r.value === currentRatio ? 'active' : ''}`;
+  // Ratio row
+  const ratioRow = ce('div', 'comp-row');
+  RATIOS.forEach(r => {
+    const btn = ce('button', `comp-pill ${r.value === currentRatio ? 'active' : ''}`);
+    btn.textContent = r.label;
     btn.dataset.ratio = r.value;
-    btn.title = r.label;
-
-    // Draw a mini rectangle icon representing the ratio
-    const [w, h] = r.value.split(':').map(Number);
-    const maxDim = 20;
-    const scale = maxDim / Math.max(w, h);
-    const rw = Math.round(w * scale);
-    const rh = Math.round(h * scale);
-
-    btn.innerHTML = `
-      <svg width="${rw + 4}" height="${rh + 4}" viewBox="0 0 ${rw + 4} ${rh + 4}" class="comp-icon">
-        <rect x="2" y="2" width="${rw}" height="${rh}" rx="2" ry="2"
-              fill="none" stroke="currentColor" stroke-width="1.5"/>
-      </svg>
-      <span class="comp-label">${r.label}</span>
-    `;
-
-    btn.addEventListener('click', () => {
-      setRatio(r.value);
-    });
-
-    containerEl.appendChild(btn);
+    btn.addEventListener('click', () => setRatio(r.value));
+    ratioRow.appendChild(btn);
   });
-}
 
-/**
- * Set the current ratio
- */
-export function setRatio(ratio) {
-  currentRatio = ratio;
+  // Orientation toggle
+  const oriBtn = ce('button', 'comp-ori-btn');
+  oriBtn.title = currentOrientation === 'landscape' ? '切换为纵向' : '切换为横向';
+  oriBtn.innerHTML = currentOrientation === 'landscape'
+    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/></svg><span>横</span>`
+    : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/></svg><span>纵</span>`;
+  oriBtn.addEventListener('click', () => {
+    currentOrientation = currentOrientation === 'landscape' ? 'portrait' : 'landscape';
+    fireChange();
+    render();
+  });
+  ratioRow.appendChild(oriBtn);
+  containerEl.appendChild(ratioRow);
 
-  if (containerEl) {
-    containerEl.querySelectorAll('.comp-option').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.ratio === ratio);
+  // Resolution row
+  const resRow = ce('div', 'comp-row comp-row-res');
+  const resLabel = ce('span', 'comp-res-label');
+  resLabel.textContent = '分辨率';
+  resRow.appendChild(resLabel);
+
+  RESOLUTIONS.forEach(r => {
+    const btn = ce('button', `comp-pill comp-pill-sm ${r.value === currentResolution ? 'active' : ''}`);
+    btn.textContent = r.label;
+    btn.addEventListener('click', () => {
+      currentResolution = r.value;
+      fireChange();
+      render();
     });
-  }
+    resRow.appendChild(btn);
+  });
+  containerEl.appendChild(resRow);
+}
 
-  changeCallback?.(ratio);
+function setRatio(ratio) {
+  currentRatio = ratio;
+  fireChange();
+  render();
+}
+
+function fireChange() {
+  changeCallback?.(getCompositionData());
 }
 
 /**
- * Get current aspect ratio
- * @returns {string} e.g. '16:9'
+ * Get current composition data
+ */
+export function getCompositionData() {
+  return {
+    ratio: currentRatio,
+    orientation: currentOrientation,
+    resolution: currentResolution,
+  };
+}
+
+/**
+ * Get aspect ratio string for canvas (backward compat)
+ * Returns effective ratio considering orientation
  */
 export function getAspectRatio() {
+  if (currentRatio === '1:1') return '1:1';
+  const [w, h] = currentRatio.split(':').map(Number);
+  if (currentOrientation === 'portrait') {
+    return `${h}:${w}`;
+  }
   return currentRatio;
+}
+
+/* ---- Helpers ---- */
+function ce(tag, cls) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  return e;
 }

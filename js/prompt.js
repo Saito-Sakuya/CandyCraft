@@ -4,7 +4,7 @@
  * Optimization incorporates composition, character layout, camera, and lighting.
  */
 
-/* ---- Analysis Phase System Prompt (v2) ---- */
+/* ---- Analysis Phase System Prompt (v3) ---- */
 const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾问。
 用户会给你一段文生图提示词，请你分析该提示词的特点和可优化方向。
 
@@ -18,16 +18,22 @@ const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾
    - default: 你对当前提示词在该维度上的评估值（0-100）
    - labels: [最小端描述, 最大端描述]，如 ["极简克制", "极致细腻"]
 
-2. "characters": 从提示词中提取的人物/主体列表数组，每个包含：
-   - id: 唯一标识（如 "char_1"）
-   - name: 角色名称
-   - description: 角色的外观或特征简述
-   - role: "主角" 或 "配角" 或 "背景"
+2. "elements": 从提示词中提取的所有视觉元素数组（包括人物和背景景物），每个包含：
+   - id: 唯一标识（如 "elem_1"）
+   - type: "character"（人物/角色）或 "object"（景物/建筑/环境）
+   - layer: "foreground"（前景）或 "background"（后景）
+   - name: 名称
+   - description: 外观或特征简述
+   - role: "主角" 或 "配角" 或 "背景景物"
    - position: { "x": 0-100, "y": 0-100 } 你建议的画面位置（百分比坐标）
    - size: { "w": 10-40, "h": 15-50 } 你建议的框体尺寸（百分比）
 
-   如果提示词中没有明确人物，可返回画面中的主要物体/主体作为替代。
-   如果只有一个主体，也要返回。
+   规则：
+   - 人物/角色 → type: "character", layer: "foreground"
+   - 环境/建筑/自然景物 → type: "object", layer: "background"
+   - 如果提示词暗示了场景环境（如"窗外的雨天城市""废弃城堡"），也要生成对应的后景元素
+   - 至少输出 1 个前景元素和 1 个后景元素（如果文意合理的话）
+   - 如果提示词中没有明确人物，可把画面主体作为前景元素
 
 3. "presets": 2~4 个预设优化方案数组，每个包含：
    - name: 方案名称（2-4个字，如"电影海报""水彩插画""极简美学"）
@@ -165,13 +171,22 @@ export function buildOptimizeMessages(userPrompt, params) {
     .map(d => `${d.name}: ${d.value}/${d.max} (${d.labels[0]} ← → ${d.labels[1]})`)
     .join('\n');
 
-  // Composition
-  const compMap = { '16:9': '横向 (16:9)', '9:16': '纵向 (9:16)', '1:1': '方形 (1:1)' };
-  const compDesc = compMap[composition] || '横向 (16:9)';
+  // Composition — now accepts object or string
+  let compDesc;
+  if (typeof composition === 'object' && composition !== null) {
+    const r = composition.ratio || '16:9';
+    const o = composition.orientation || 'landscape';
+    const res = composition.resolution || '';
+    const oLabel = o === 'landscape' ? 'landscape' : 'portrait';
+    compDesc = `${r} ${oLabel}${res ? `, ${res}` : ''} (--ar ${r})`;
+  } else {
+    const compMap = { '16:9': '16:9 landscape (--ar 16:9)', '9:16': '9:16 portrait (--ar 9:16)', '1:1': '1:1 square (--ar 1:1)' };
+    compDesc = compMap[composition] || '16:9 landscape (--ar 16:9)';
+  }
 
-  // Elements — split by layer
-  let fgDesc = '无';
-  let bgDesc = '无';
+  // Elements — split by layer, use spatial descriptions instead of raw coords
+  let fgDesc = 'none';
+  let bgDesc = 'none';
   const allElems = elements || [];
 
   const fgElems = allElems.filter(e => e.layer === 'foreground');
@@ -181,10 +196,10 @@ export function buildOptimizeMessages(userPrompt, params) {
     fgDesc = fgElems
       .sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
       .map(e => {
-        let line = `- ${e.name}: 位置(${Math.round(e.x)}%, ${Math.round(e.y)}%), 大小(${Math.round(e.w)}%×${Math.round(e.h)}%)`;
-        if (e.description) line += `, 描述: "${e.description}"`;
-        if (e.prompt) line += `, 提示词: "${e.prompt}"`;
-        if (e.focusPoint) line += `, [焦点: ${e.focusPoint}]`;
+        let line = `- ${e.name}: ${posToSpatial(e.x, e.y)}, ${sizeToScale(e.w, e.h)}`;
+        if (e.description) line += `, "${e.description}"`;
+        if (e.prompt) line += `, prompt: "${e.prompt}"`;
+        if (e.focusPoint) line += `, [focus: ${e.focusPoint}]`;
         return line;
       }).join('\n');
   }
@@ -193,69 +208,71 @@ export function buildOptimizeMessages(userPrompt, params) {
     bgDesc = bgElems
       .sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
       .map(e => {
-        let line = `- ${e.name}: 位置(${Math.round(e.x)}%, ${Math.round(e.y)}%), 大小(${Math.round(e.w)}%×${Math.round(e.h)}%)`;
-        if (e.description) line += `, 描述: "${e.description}"`;
-        if (e.prompt) line += `, 提示词: "${e.prompt}"`;
-        if (e.focusPoint) line += `, [焦点: ${e.focusPoint}]`;
+        let line = `- ${e.name}: ${posToSpatial(e.x, e.y)}, ${sizeToScale(e.w, e.h)}`;
+        if (e.description) line += `, "${e.description}"`;
+        if (e.prompt) line += `, prompt: "${e.prompt}"`;
+        if (e.focusPoint) line += `, [focus: ${e.focusPoint}]`;
         return line;
       }).join('\n');
   }
 
-  // Links
-  let linkDesc = '无';
+  // Links (with optional description)
+  let linkDesc = 'none';
   if (links && links.length > 0) {
     linkDesc = links.map(l => {
       const fromEl = allElems.find(e => e.id === l.fromId);
       const toEl = allElems.find(e => e.id === l.toId);
-      const typeLabel = l.type === 'same-plane' ? '同一景深平面' : l.label || l.type;
-      return `- ${fromEl?.name || '?'} ←${typeLabel}→ ${toEl?.name || '?'}`;
+      const typeLabel = l.type === 'same-plane' ? 'same depth plane' : l.label || l.type;
+      let line = `- ${fromEl?.name || '?'} ←${typeLabel}→ ${toEl?.name || '?'}`;
+      if (l.description) line += ` (${l.description})`;
+      return line;
     }).join('\n');
   }
 
   // Focus points summary
   const focusElems = allElems.filter(e => e.focusPoint);
-  let focusDesc = '无指定焦点';
+  let focusDesc = 'no specific focus point';
   if (focusElems.length > 0) {
     focusDesc = focusElems.map(e => `${e.name}: ${e.focusPoint}`).join(', ');
   }
 
-  // Scene
-  let sceneDesc = '默认';
+  // Scene — use English keys
+  let sceneDesc = 'default';
   if (scene) {
     const parts = [];
-    if (scene.cameraPreset) parts.push(`机位: ${scene.cameraPreset}`);
-    if (scene.focalLength) parts.push(`焦距: ${scene.focalLength}`);
-    if (scene.framing) parts.push(`景别: ${scene.framing}`);
-    if (scene.aperture) parts.push(`光圈: ${scene.aperture}`);
-    if (scene.lightingPreset) parts.push(`布光方案: ${scene.lightingPreset}`);
-    if (scene.lightQuality) parts.push(`光线质感: ${scene.lightQuality}`);
-    if (scene.colorTemp) parts.push(`色温: ${scene.colorTemp}`);
-    if (scene.timeOfDay) parts.push(`时段: ${scene.timeOfDay}`);
-    sceneDesc = parts.length > 0 ? parts.join('\n') : '默认';
+    if (scene.cameraPreset) parts.push(`camera: ${scene.cameraPreset}`);
+    if (scene.focalLength) parts.push(`focal: ${scene.focalLength}`);
+    if (scene.framing) parts.push(`framing: ${scene.framing}`);
+    if (scene.aperture) parts.push(`aperture: ${scene.aperture}`);
+    if (scene.lightingPreset) parts.push(`lighting: ${scene.lightingPreset}`);
+    if (scene.lightQuality) parts.push(`light quality: ${scene.lightQuality}`);
+    if (scene.colorTemp) parts.push(`color temp: ${scene.colorTemp}`);
+    if (scene.timeOfDay) parts.push(`time: ${scene.timeOfDay}`);
+    sceneDesc = parts.length > 0 ? parts.join('\n') : 'default';
   }
 
-  const userMessage = `原始提示词：
+  const userMessage = `Original prompt:
 ${userPrompt}
 
-目标风格：${styleLabel}
+Target style: ${styleLabel}
 
-构图比例：${compDesc}
+Composition: ${compDesc}
 
-前景元素（按遮挡顺序从前到后）：
+Foreground elements (front to back):
 ${fgDesc}
 
-后景元素（按遮挡顺序从前到后）：
+Background elements (front to back):
 ${bgDesc}
 
-元素关系/景深链接：
+Element relationships / depth links:
 ${linkDesc}
 
-画面焦点：${focusDesc}
+Visual focus: ${focusDesc}
 
-各维度参数：
+Dimension parameters:
 ${dimDesc}
 
-相机与布光：
+Camera & lighting:
 ${sceneDesc}`;
 
   return [
@@ -390,4 +407,31 @@ function normalizePresets(arr, dimensions) {
 
 function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
+}
+
+/* ---- Audit helpers: convert coords to spatial descriptions ---- */
+
+/**
+ * Convert x%, y% position to a spatial description.
+ * e.g. (25, 30) → "upper-left area"
+ */
+function posToSpatial(x, y) {
+  const h = x < 33 ? 'left' : x > 66 ? 'right' : 'center';
+  const v = y < 33 ? 'upper' : y > 66 ? 'lower' : 'middle';
+  if (h === 'center' && v === 'middle') return 'center of frame';
+  if (h === 'center') return `${v} area`;
+  if (v === 'middle') return `${h} side`;
+  return `${v}-${h} area`;
+}
+
+/**
+ * Convert w%, h% size to a relative scale description.
+ * e.g. (30, 40) → "prominent" ; (10, 15) → "small"
+ */
+function sizeToScale(w, h) {
+  const area = w * h;
+  if (area > 800) return 'dominant';
+  if (area > 400) return 'prominent';
+  if (area > 200) return 'medium';
+  return 'small';
 }

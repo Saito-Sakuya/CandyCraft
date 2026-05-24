@@ -10,7 +10,7 @@ import { buildAnalysisMessages, buildOptimizeMessages, parseAnalysisResponse } f
 import { initRadar, updateRadarValues, destroyRadar } from './radar.js';
 import { renderSliders, getSliderValues, resetSliders, setValues, registerManualChangeCallback, destroySliders } from './sliders.js';
 import { renderPresets, clearActivePreset, destroyPresets } from './presets.js';
-import { initComposition, getAspectRatio } from './composition.js';
+import { initComposition, getAspectRatio, getCompositionData } from './composition.js';
 import { initCanvas, updateCanvasAspect, getCanvasData, addElement, destroyCanvas } from './canvas.js';
 import { initScene, getSceneData, destroyScene } from './scene.js';
 import { initStyleToggle, getStyle } from './style-toggle.js';
@@ -111,7 +111,9 @@ function init() {
 
 /* ============ Composition Change ============ */
 
-function handleCompositionChange(ratio) {
+function handleCompositionChange(data) {
+  // data may be an object {ratio, orientation} or a string
+  const ratio = typeof data === 'string' ? data : getAspectRatio();
   updateCanvasAspect(ratio);
 }
 
@@ -273,7 +275,7 @@ async function handleOptimize() {
     const dimensions = getSliderValues();
     const canvasData = getCanvasData();
     const sceneData = getSceneData();
-    const composition = getAspectRatio();
+    const composition = getCompositionData();
 
     const messages = buildOptimizeMessages(state.originalPrompt, {
       dimensions,

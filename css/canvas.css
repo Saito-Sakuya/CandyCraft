@@ -16,6 +16,7 @@
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 320px;
   aspect-ratio: 16 / 9;
   background: var(--color-bg-card);
   border: 2px solid var(--color-border);
@@ -25,8 +26,9 @@
   cursor: crosshair;
 }
 
+/* Fallback static ratios (JS overrides via inline style) */
 .canvas-board[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
-.canvas-board[data-ratio="9:16"] { aspect-ratio: 9 / 16; max-height: 520px; }
+.canvas-board[data-ratio="9:16"] { aspect-ratio: 9 / 16; max-height: 600px; }
 .canvas-board[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
 
 /* Grid background */
@@ -606,4 +608,114 @@
 .canvas-toolbar-right {
   display: flex;
   align-items: center;
+}
+
+/* ---- Layer Filter Buttons ---- */
+.layer-filter-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--space-sm);
+}
+
+.layer-filter-btn {
+  flex: 1;
+  padding: 4px 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.layer-filter-btn.active {
+  background: var(--gradient-primary);
+  color: #fff;
+  border-color: transparent;
+}
+
+.layer-filter-btn:hover:not(.active) {
+  border-color: var(--color-candy-lavender);
+}
+
+/* ---- Hidden Layer Elements ---- */
+.elem-box.layer-hidden {
+  opacity: 0.12;
+  pointer-events: none;
+  filter: grayscale(0.8);
+}
+
+/* ---- Link Description in Panel ---- */
+.layer-link-desc {
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+/* ---- Composition Pill Buttons ---- */
+.comp-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.comp-row-res {
+  margin-top: 6px;
+}
+
+.comp-res-label {
+  font-size: 0.72rem;
+  color: var(--color-text-tertiary);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.comp-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.comp-pill.active {
+  background: var(--gradient-primary);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--shadow-glow-pink);
+}
+
+.comp-pill:hover:not(.active) {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-candy-lavender);
+}
+
+.comp-pill-sm {
+  padding: 2px 8px;
+  font-size: 0.65rem;
+}
+
+.comp-ori-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-candy-lavender);
+  border-radius: var(--radius-full);
+  background: rgba(195, 166, 255, 0.08);
+  font-size: 0.72rem;
+  color: var(--color-candy-lavender);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.comp-ori-btn:hover {
+  background: rgba(195, 166, 255, 0.18);
 }
