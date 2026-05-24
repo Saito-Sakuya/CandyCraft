@@ -1,12 +1,21 @@
 /* ============================================
-   Canvas — Character Layout Board Styles
-   Draggable character boxes, bindings, toolbar
+   Canvas — Element Layout Board + Layer Panel
+   Foreground/background layers, draggable elements,
+   layer panel, links, focus points
    ============================================ */
+
+/* ---- Layout: Board + Layer Panel side by side ---- */
+.canvas-layout {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
 
 /* ---- Board Container ---- */
 .canvas-board {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   aspect-ratio: 16 / 9;
   background: var(--color-bg-card);
   border: 2px solid var(--color-border);
@@ -41,295 +50,560 @@
   pointer-events: none;
   z-index: 0;
 }
+.canvas-crosshair-h { left: 0; right: 0; top: 50%; height: 1px; }
+.canvas-crosshair-v { top: 0; bottom: 0; left: 50%; width: 1px; }
 
-.canvas-crosshair-h {
-  left: 0; right: 0;
-  top: 50%;
-  height: 1px;
-}
-
-.canvas-crosshair-v {
-  top: 0; bottom: 0;
-  left: 50%;
-  width: 1px;
-}
-
-/* Rule of thirds guides */
-.canvas-third {
+/* ---- Element Box (shared) ---- */
+.elem-box {
   position: absolute;
-  background: var(--color-candy-lavender);
-  opacity: 0.08;
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* ---- Character Box ---- */
-.char-box {
-  position: absolute;
-  border: 2px solid var(--color-candy-lavender);
   border-radius: var(--radius-md);
-  background: rgba(195, 166, 255, 0.06);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
-  z-index: 2;
-  min-width: 50px;
-  min-height: 60px;
+  padding: 4px;
+  cursor: grab;
+  touch-action: none;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  user-select: none;
+  overflow: hidden;
 }
 
-.char-box:hover {
+.elem-box:active { cursor: grabbing; }
+
+/* ---- Foreground element ---- */
+.elem-fg {
+  border: 2px solid var(--color-candy-pink);
+  background: rgba(255, 143, 171, 0.06);
+  box-shadow: 0 2px 8px rgba(255, 143, 171, 0.1);
+}
+
+.elem-fg.selected {
   border-color: var(--color-candy-pink);
-  background: rgba(255, 143, 171, 0.08);
-  box-shadow: 0 2px 12px rgba(255, 143, 171, 0.15);
+  box-shadow: 0 0 0 3px rgba(255, 143, 171, 0.2), 0 4px 12px rgba(255, 143, 171, 0.15);
 }
 
-.char-box.selected {
-  border-color: var(--color-candy-pink);
-  border-width: 2.5px;
-  background: rgba(255, 143, 171, 0.1);
-  box-shadow: 0 0 0 3px rgba(255, 143, 171, 0.15), var(--shadow-md);
-  z-index: 3;
-}
-
-.char-box.dragging {
-  cursor: grabbing;
+/* ---- Background element ---- */
+.elem-bg {
+  border: 2px dashed var(--color-candy-sky);
+  background: rgba(137, 207, 243, 0.06);
+  box-shadow: 0 2px 8px rgba(137, 207, 243, 0.1);
   opacity: 0.85;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
 }
 
-.char-box-role {
+.elem-bg.selected {
+  border-color: var(--color-candy-sky);
+  box-shadow: 0 0 0 3px rgba(137, 207, 243, 0.2), 0 4px 12px rgba(137, 207, 243, 0.15);
+  opacity: 1;
+}
+
+/* ---- Link target highlight ---- */
+.elem-box.link-target {
+  animation: linkPulse 1s ease-in-out infinite;
+}
+
+@keyframes linkPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(195, 166, 255, 0.2); }
+  50% { box-shadow: 0 0 0 5px rgba(195, 166, 255, 0.4); }
+}
+
+/* ---- Element box inner labels ---- */
+.elem-box-layer {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  font-size: 0.5rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+
+.elem-fg .elem-box-layer {
+  background: rgba(255, 143, 171, 0.2);
+  color: var(--color-candy-pink);
+}
+
+.elem-bg .elem-box-layer {
+  background: rgba(137, 207, 243, 0.2);
+  color: var(--color-candy-sky);
+}
+
+.elem-box-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.elem-box-desc {
+  font-size: 0.55rem;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.elem-box-focus {
+  font-size: 0.5rem;
+  color: var(--color-candy-lemon);
+  background: rgba(255, 230, 109, 0.15);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.elem-box-edit {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  background: rgba(255,255,255,0.8);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.elem-box:hover .elem-box-edit,
+.elem-box.selected .elem-box-edit { opacity: 1; }
+
+.elem-box-edit svg {
+  width: 10px;
+  height: 10px;
+  color: var(--color-text-secondary);
+}
+
+.elem-box-coords {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  color: var(--color-candy-pink);
+  background: rgba(255,255,255,0.9);
+  padding: 1px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Flash animation when clicking layer tag */
+.elem-flash {
+  animation: elemFlash 0.6s ease;
+}
+
+@keyframes elemFlash {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
+/* ---- SVG Binding Lines ---- */
+.binding-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ---- Edit Popup ---- */
+.edit-popup {
+  position: absolute;
+  z-index: 100;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  box-shadow: var(--shadow-lg);
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  animation: fadeInUp 0.2s ease;
+}
+
+.popup-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.popup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.popup-field label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.popup-input {
+  padding: 5px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.popup-input:focus {
+  border-color: var(--color-candy-lavender);
+}
+
+.popup-textarea {
+  padding: 5px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-family: var(--font-sans);
+  resize: vertical;
+  min-height: 40px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.popup-textarea:focus {
+  border-color: var(--color-candy-lavender);
+}
+
+.popup-layer-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.popup-layer-btn,
+.popup-type-btn {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.popup-layer-btn.active {
+  background: var(--gradient-primary);
+  color: #fff;
+  border-color: transparent;
+}
+
+.popup-type-btn.active {
+  background: var(--gradient-secondary);
+  color: #fff;
+  border-color: transparent;
+}
+
+.popup-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-xs);
+}
+
+.popup-delete {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.popup-close {
+  padding: 4px 12px;
+  background: var(--gradient-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* ---- Link Picker Popup ---- */
+.link-picker-popup {
+  position: absolute;
+  z-index: 100;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  box-shadow: var(--shadow-lg);
+  width: 200px;
+  animation: fadeInUp 0.2s ease;
+}
+
+.popup-options {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: var(--space-sm);
+}
+
+.popup-opt {
+  padding: 5px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+}
+
+.popup-opt:hover {
+  background: #faf5ff;
+  border-color: var(--color-candy-lavender);
+  color: var(--color-candy-lavender);
+}
+
+/* ================================================================
+   LAYER PANEL — Right-side tag list
+   ================================================================ */
+
+#layer-panel {
+  width: 170px;
+  min-width: 140px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  border-left: 1px solid var(--color-border-light);
+  padding-left: var(--space-sm);
+}
+
+/* ---- Header: Add buttons ---- */
+.layer-header {
+  display: flex;
+  gap: 4px;
+}
+
+.layer-add-btn {
+  flex: 1;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1.5px dashed var(--color-border);
+  background: none;
+  font-size: 0.65rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.layer-add-btn:hover {
+  border-style: solid;
+  color: var(--color-text-secondary);
+}
+
+.layer-add-fg:hover {
+  border-color: var(--color-candy-pink);
+  color: var(--color-candy-pink);
+}
+
+.layer-add-bg:hover {
+  border-color: var(--color-candy-sky);
+  color: var(--color-candy-sky);
+}
+
+/* ---- Tag List ---- */
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 300px;
+}
+
+/* ---- Tag Item ---- */
+.layer-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-size: 0.65rem;
+}
+
+.layer-tag:hover {
+  background: rgba(195, 166, 255, 0.06);
+  border-color: var(--color-border-light);
+}
+
+.layer-tag-active {
+  background: rgba(195, 166, 255, 0.1);
+  border-color: var(--color-candy-lavender);
+}
+
+.layer-tag-handle {
+  cursor: grab;
+  color: var(--color-text-tertiary);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.layer-tag-icon {
+  font-size: 0.5rem;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.layer-tag-fg {
+  background: rgba(255, 143, 171, 0.15);
+  color: var(--color-candy-pink);
+}
+
+.layer-tag-bg {
+  background: rgba(137, 207, 243, 0.15);
+  color: var(--color-candy-sky);
+}
+
+.layer-tag-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.layer-tag-up,
+.layer-tag-down,
+.layer-tag-del {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.55rem;
+  color: var(--color-text-tertiary);
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.layer-tag:hover .layer-tag-up,
+.layer-tag:hover .layer-tag-down,
+.layer-tag:hover .layer-tag-del { opacity: 1; }
+
+.layer-tag-del:hover { color: var(--color-error); }
+.layer-tag-up:hover,
+.layer-tag-down:hover { color: var(--color-candy-lavender); }
+
+/* Drag-to-reorder feedback */
+.layer-tag-dragging { opacity: 0.4; }
+.layer-tag-dragover { border-color: var(--color-candy-lavender); background: rgba(195, 166, 255, 0.12); }
+
+/* ---- Footer: Link button ---- */
+.layer-footer {
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.layer-link-btn {
+  width: 100%;
+  padding: 5px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 0.68rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.layer-link-btn:hover {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-candy-lavender);
+}
+
+.layer-link-btn.active {
+  background: var(--gradient-secondary);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* ---- Existing Links Display ---- */
+.layer-links {
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--color-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.layer-links-title {
   font-size: 0.6rem;
+  font-weight: 600;
   color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.char-box-name {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  text-align: center;
-  line-height: 1.2;
-  padding: 0 4px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.char-box-desc {
-  font-size: 0.6rem;
-  color: var(--color-text-tertiary);
-  text-align: center;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 4px;
-}
-
-/* Edit button — top-right corner */
-.char-box-edit {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--gradient-primary);
-  border: 2px solid #fff;
-  color: #fff;
+.layer-link-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transform: scale(0.7);
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
-  z-index: 5;
-}
-
-.char-box:hover .char-box-edit,
-.char-box.selected .char-box-edit {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.char-box-edit svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* Binding mode indicator */
-.char-box.bind-target {
-  border-style: dashed;
-  animation: pulse 1s infinite;
-}
-
-/* ---- Binding SVG Overlay ---- */
-.binding-svg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.binding-line {
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
-  pointer-events: stroke;
-  cursor: pointer;
-}
-
-.binding-line:hover {
-  stroke-width: 3;
-}
-
-.binding-label-bg {
-  fill: var(--color-bg-card);
-  rx: 6;
-  ry: 6;
-}
-
-.binding-label-text {
-  font-size: 10px;
-  font-family: var(--font-sans);
-  fill: var(--color-text-secondary);
-  text-anchor: middle;
-  dominant-baseline: central;
-  pointer-events: none;
-}
-
-/* ---- Character Edit Popup ---- */
-.char-edit-popup {
-  position: absolute;
-  width: 260px;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: var(--space-md);
-  z-index: 20;
-  animation: scaleIn 0.2s ease;
-}
-
-.char-edit-popup .form-group {
-  margin-bottom: var(--space-sm);
-}
-
-.char-edit-popup .form-group:last-child {
-  margin-bottom: 0;
-}
-
-.char-edit-popup input,
-.char-edit-popup textarea {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1.5px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.82rem;
-  background: var(--color-bg-input);
-}
-
-.char-edit-popup textarea {
-  min-height: 60px;
-  resize: vertical;
-}
-
-.char-edit-popup input:focus,
-.char-edit-popup textarea:focus {
-  outline: none;
-  border-color: var(--color-candy-lavender);
-}
-
-.char-edit-popup label {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  margin-bottom: 2px;
-  display: block;
-}
-
-.char-edit-actions {
-  display: flex;
   justify-content: space-between;
-  margin-top: var(--space-sm);
+  font-size: 0.6rem;
+  color: var(--color-text-secondary);
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(195, 166, 255, 0.05);
 }
 
-/* ---- Canvas Toolbar ---- */
+.layer-link-del {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  font-size: 0.7rem;
+}
+
+.layer-link-del:hover { color: var(--color-error); }
+
+/* ---- Toolbar ---- */
 .canvas-toolbar {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding: var(--space-sm) 0;
+  align-items: center;
+  margin-top: var(--space-sm);
+  padding: 0 var(--space-xs);
+}
+
+.canvas-toolbar-left {
+  display: flex;
   gap: var(--space-sm);
 }
 
-.canvas-toolbar-left,
 .canvas-toolbar-right {
   display: flex;
-  gap: var(--space-xs);
   align-items: center;
 }
-
-/* ---- Binding Relationship Picker ---- */
-.binding-picker {
-  position: absolute;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: var(--space-sm);
-  z-index: 25;
-  animation: scaleIn 0.15s ease;
-  min-width: 180px;
-}
-
-.binding-option {
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.82rem;
-  color: var(--color-text-primary);
-  transition: background var(--transition-fast);
-}
-
-.binding-option:hover {
-  background: rgba(195, 166, 255, 0.1);
-}
-
-.binding-colors {
-  --bind-color-0: #FF8FAB;
-  --bind-color-1: #C3A6FF;
-  --bind-color-2: #7DDFC3;
-  --bind-color-3: #FFB997;
-  --bind-color-4: #89CFF3;
-}
-
-/* ---- Coordinate Tooltip (shows during drag) ---- */
-.char-box-coords {
-  position: absolute;
-  top: -22px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(45, 43, 61, 0.8);
-  color: #fff;
-  font-size: 0.62rem;
-  font-weight: 500;
-  padding: 2px 6px;
-  border-radius: 4px;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 10;
-  font-family: var(--font-mono);
-  letter-spacing: 0.03em;
-}
-

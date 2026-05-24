@@ -1,51 +1,68 @@
 /**
- * canvas.js — Character Layout Board
- * Draggable character boxes with edit popup and binding relationships
+ * canvas.js — Element Layout Board with Layer System (v3)
+ * Foreground/background layers, draggable elements, layer panel,
+ * focus points, depth links
  */
 
 import { generateId, showToast } from './utils.js';
 
 /* ============ State ============ */
-let characters = [];
-let bindings = [];
+let elements = [];
+let links = [];
 let boardEl = null;
+let layerPanelEl = null;
 let svgEl = null;
 let selectedId = null;
-let bindingMode = false;    // true when user is selecting a second char for binding
-let bindingFromId = null;
+let linkMode = false;
+let linkFromId = null;
 let editPopupEl = null;
-let bindingPickerEl = null;
 let dragState = null;
 
-const BINDING_TYPES = [
-  { type: 'gaze', label: '对视' },
-  { type: 'hand', label: '牵手' },
-  { type: 'embrace', label: '拥抱' },
-  { type: 'back', label: '背靠背' },
-  { type: 'talk', label: '对话' },
-  { type: 'confront', label: '对峙' },
-  { type: 'protect', label: '守护' },
-  { type: 'custom', label: '自定义...' },
+const LINK_TYPES = [
+  { type: 'same-plane', label: '同一平面' },
+  { type: 'gaze',       label: '对视' },
+  { type: 'hand',       label: '牵手' },
+  { type: 'embrace',    label: '拥抱' },
+  { type: 'back',       label: '背靠背' },
+  { type: 'talk',       label: '对话' },
+  { type: 'confront',   label: '对峙' },
+  { type: 'protect',    label: '守护' },
+  { type: 'custom',     label: '自定义...' },
 ];
 
-const BIND_COLORS = ['#FF8FAB', '#C3A6FF', '#7DDFC3', '#FFB997', '#89CFF3'];
+const LINK_COLORS = ['#FF8FAB', '#C3A6FF', '#7DDFC3', '#FFB997', '#89CFF3'];
 
-/* ============ Init ============ */
+/* ============ Public API ============ */
 
 /**
- * Initialize the character layout canvas
- * @param {string} containerId — ID of the board container
- * @param {Array} chars — character data from AI analysis
+ * Initialize the element layout canvas
+ * @param {string} boardId — ID of the board container
+ * @param {string} layerPanelId — ID of the layer panel container
+ * @param {Array} data — element data from AI analysis (characters + objects)
  */
-export function initCanvas(containerId, chars) {
-  boardEl = document.getElementById(containerId);
+export function initCanvas(boardId, layerPanelId, data) {
+  boardEl = document.getElementById(boardId);
+  layerPanelEl = document.getElementById(layerPanelId);
   if (!boardEl) return;
 
-  // Deep clone
-  characters = (chars || []).map(c => ({ ...c }));
-  bindings = [];
+  elements = (data || []).map((e, i) => ({
+    id: e.id || generateId(),
+    type: e.type || 'character',
+    layer: e.layer || 'foreground',
+    name: e.name || '未命名',
+    description: e.description || '',
+    prompt: e.prompt || '',
+    role: e.role || '',
+    x: e.x ?? e.position?.x ?? (30 + Math.random() * 40),
+    y: e.y ?? e.position?.y ?? (30 + Math.random() * 40),
+    w: e.w ?? e.size?.w ?? (e.type === 'object' ? 22 : 18),
+    h: e.h ?? e.size?.h ?? (e.type === 'object' ? 18 : 28),
+    zIndex: e.zIndex ?? i,
+    focusPoint: e.focusPoint || null,
+  }));
+  links = [];
   selectedId = null;
-  bindingMode = false;
+  linkMode = false;
 
   render();
   setupBoardEvents();
@@ -64,30 +81,40 @@ export function updateCanvasAspect(ratio) {
  */
 export function getCanvasData() {
   return {
-    characters: characters.map(c => ({ ...c })),
-    bindings: bindings.map(b => ({ ...b })),
+    elements: elements.map(e => ({ ...e })),
+    links: links.map(l => ({ ...l })),
   };
 }
 
 /**
- * Add a new character to the board
+ * Add a new element
  */
-export function addCharacter(charData) {
-  const newChar = {
-    id: charData?.id || generateId(),
-    name: charData?.name || '新角色',
-    description: charData?.description || '',
-    role: charData?.role || '配角',
-    prompt: charData?.prompt || '',
-    x: charData?.x ?? 50,
-    y: charData?.y ?? 50,
-    w: charData?.w ?? 18,
-    h: charData?.h ?? 28,
-    selected: false,
+export function addElement(type = 'character', layer = 'foreground') {
+  const isChar = type === 'character';
+  const newElem = {
+    id: generateId(),
+    type,
+    layer,
+    name: isChar ? '新角色' : '新景物',
+    description: '',
+    prompt: '',
+    role: isChar ? '配角' : '',
+    x: 25 + Math.random() * 50,
+    y: 25 + Math.random() * 50,
+    w: isChar ? 18 : 22,
+    h: isChar ? 28 : 18,
+    zIndex: elements.length,
+    focusPoint: null,
   };
-  characters.push(newChar);
+  elements.push(newElem);
   render();
-  return newChar;
+  selectElement(newElem.id);
+  return newElem;
+}
+
+/** Backward compat alias */
+export function addCharacter(charData) {
+  return addElement('character', 'foreground');
 }
 
 /**
@@ -95,8 +122,9 @@ export function addCharacter(charData) {
  */
 export function destroyCanvas() {
   if (boardEl) boardEl.innerHTML = '';
-  characters = [];
-  bindings = [];
+  if (layerPanelEl) layerPanelEl.innerHTML = '';
+  elements = [];
+  links = [];
   selectedId = null;
   closeAllPopups();
 }
@@ -106,45 +134,60 @@ export function destroyCanvas() {
 function render() {
   if (!boardEl) return;
   closeAllPopups();
-
-  // Clear
   boardEl.innerHTML = '';
 
   // Crosshairs
-  boardEl.innerHTML += `
+  boardEl.insertAdjacentHTML('beforeend', `
     <div class="canvas-crosshair-h"></div>
     <div class="canvas-crosshair-v"></div>
-  `;
+  `);
 
-  // SVG overlay for binding lines
+  // SVG overlay for link lines
   svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svgEl.classList.add('binding-svg');
   boardEl.appendChild(svgEl);
 
-  // Render characters
-  characters.forEach(ch => renderCharBox(ch));
+  // Sort by zIndex and render
+  const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+  sorted.forEach(elem => renderElementBox(elem));
 
-  // Render binding lines
-  renderBindings();
+  // Link lines
+  renderLinkLines();
+
+  // Layer panel
+  renderLayerPanel();
 }
 
-function renderCharBox(ch) {
+function renderElementBox(elem) {
   const box = document.createElement('div');
-  box.className = `char-box ${ch.id === selectedId ? 'selected' : ''} ${bindingMode && ch.id !== bindingFromId ? 'bind-target' : ''}`;
-  box.dataset.id = ch.id;
-  box.style.left = `${ch.x}%`;
-  box.style.top = `${ch.y}%`;
-  box.style.width = `${ch.w}%`;
-  box.style.height = `${ch.h}%`;
+  const isSelected = elem.id === selectedId;
+  const isFg = elem.layer === 'foreground';
+  const isChar = elem.type === 'character';
+
+  box.className = [
+    'elem-box',
+    isFg ? 'elem-fg' : 'elem-bg',
+    isChar ? 'elem-char' : 'elem-obj',
+    isSelected ? 'selected' : '',
+    linkMode && elem.id !== linkFromId ? 'link-target' : '',
+  ].filter(Boolean).join(' ');
+
+  box.dataset.id = elem.id;
+  box.style.left = `${elem.x}%`;
+  box.style.top = `${elem.y}%`;
+  box.style.width = `${elem.w}%`;
+  box.style.height = `${elem.h}%`;
+  box.style.zIndex = elem.zIndex + 10;
   box.style.transform = 'translate(-50%, -50%)';
 
-  const roleLabel = { '主角': 'MAIN', '配角': 'SUB', '背景': 'BG' }[ch.role] || ch.role;
+  const layerTag = isFg ? '前' : '后';
 
   box.innerHTML = `
-    <span class="char-box-role">${escapeHtml(roleLabel)}</span>
-    <span class="char-box-name">${escapeHtml(ch.name)}</span>
-    ${ch.description ? `<span class="char-box-desc">${escapeHtml(truncate(ch.description, 16))}</span>` : ''}
-    <button class="char-box-edit" title="编辑">
+    <span class="elem-box-layer">${layerTag}</span>
+    <span class="elem-box-name">${esc(elem.name)}</span>
+    ${elem.description ? `<span class="elem-box-desc">${esc(trunc(elem.description, 14))}</span>` : ''}
+    ${elem.focusPoint ? `<span class="elem-box-focus">焦: ${esc(trunc(elem.focusPoint, 8))}</span>` : ''}
+    <button class="elem-box-edit" title="编辑">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -152,464 +195,558 @@ function renderCharBox(ch) {
     </button>
   `;
 
-  // Edit button click
-  const editBtn = box.querySelector('.char-box-edit');
-  editBtn.addEventListener('click', (e) => {
+  // Edit button
+  box.querySelector('.elem-box-edit').addEventListener('click', (e) => {
     e.stopPropagation();
-    openEditPopup(ch.id);
+    openEditPopup(elem.id);
   });
 
-  // Box click — select or binding target
+  // Click to select + drag
   box.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.char-box-edit')) return;
+    if (e.target.closest('.elem-box-edit')) return;
 
-    if (bindingMode && ch.id !== bindingFromId) {
-      // Complete binding
-      openBindingPicker(bindingFromId, ch.id, e);
+    if (linkMode && elem.id !== linkFromId) {
+      completeLinkPick(elem.id);
       return;
     }
 
-    // Select
-    selectChar(ch.id);
-
-    // Start drag
-    startDrag(e, ch, box);
+    e.stopPropagation();
+    selectElement(elem.id);
+    startDrag(e, elem, box);
   });
 
   boardEl.appendChild(box);
 }
 
-/* ============ Drag ============ */
+/* ============ Layer Panel ============ */
 
-function startDrag(e, ch, box) {
-  e.preventDefault();
-  box.setPointerCapture(e.pointerId);
-  box.classList.add('dragging');
+function renderLayerPanel() {
+  if (!layerPanelEl) return;
+  layerPanelEl.innerHTML = '';
 
-  const boardRect = boardEl.getBoundingClientRect();
-  const startX = e.clientX;
-  const startY = e.clientY;
-  const origPctX = ch.x;
-  const origPctY = ch.y;
+  // Header with add buttons
+  const header = ce('div', 'layer-header');
+  header.innerHTML = `
+    <button class="layer-add-btn layer-add-fg" title="添加前景元素">+ 前景</button>
+    <button class="layer-add-btn layer-add-bg" title="添加后景元素">+ 后景</button>
+  `;
+  header.querySelector('.layer-add-fg').addEventListener('click', () => addElement('character', 'foreground'));
+  header.querySelector('.layer-add-bg').addEventListener('click', () => addElement('object', 'background'));
+  layerPanelEl.appendChild(header);
 
-  dragState = { ch, box, boardRect, startX, startY, origPctX, origPctY };
+  // Tag list (reverse order: top = highest z-index = rendered on top)
+  const list = ce('div', 'layer-list');
+  const sorted = [...elements].sort((a, b) => b.zIndex - a.zIndex);
 
-  const onMove = (ev) => {
-    if (!dragState) return;
-    const dx = ev.clientX - startX;
-    const dy = ev.clientY - startY;
-    const newX = origPctX + (dx / boardRect.width) * 100;
-    const newY = origPctY + (dy / boardRect.height) * 100;
+  sorted.forEach(elem => {
+    const tag = ce('div', `layer-tag ${elem.id === selectedId ? 'layer-tag-active' : ''}`);
+    tag.dataset.id = elem.id;
+    tag.draggable = true;
 
-    ch.x = clamp(newX, ch.w / 2, 100 - ch.w / 2);
-    ch.y = clamp(newY, ch.h / 2, 100 - ch.h / 2);
+    const isFg = elem.layer === 'foreground';
+    const isChar = elem.type === 'character';
+    const icon = isChar ? '\u2630' : '\u25A3'; // ☰ ▣
+    const layerBadge = isFg ? '前' : '后';
 
-    box.style.left = `${ch.x}%`;
-    box.style.top = `${ch.y}%`;
+    tag.innerHTML = `
+      <span class="layer-tag-handle" title="拖拽排序">\u2261</span>
+      <span class="layer-tag-icon ${isFg ? 'layer-tag-fg' : 'layer-tag-bg'}">${layerBadge}</span>
+      <span class="layer-tag-name">${esc(trunc(elem.name, 8))}</span>
+      <button class="layer-tag-up" title="上移">\u25B2</button>
+      <button class="layer-tag-down" title="下移">\u25BC</button>
+      <button class="layer-tag-del" title="删除">\u00D7</button>
+    `;
 
-    // Show coordinate tooltip
-    showCoordTooltip(box, ch.x, ch.y);
+    // Click to select
+    tag.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      selectElement(elem.id);
+      scrollToElement(elem.id);
+    });
 
-    renderBindings();
-  };
+    // Move up (increase z-index)
+    tag.querySelector('.layer-tag-up').addEventListener('click', (e) => {
+      e.stopPropagation();
+      moveLayer(elem.id, 1);
+    });
 
-  const onUp = () => {
-    box.classList.remove('dragging');
-    hideCoordTooltip(box);
-    box.removeEventListener('pointermove', onMove);
-    box.removeEventListener('pointerup', onUp);
-    dragState = null;
-  };
+    // Move down (decrease z-index)
+    tag.querySelector('.layer-tag-down').addEventListener('click', (e) => {
+      e.stopPropagation();
+      moveLayer(elem.id, -1);
+    });
 
-  box.addEventListener('pointermove', onMove);
-  box.addEventListener('pointerup', onUp);
+    // Delete
+    tag.querySelector('.layer-tag-del').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteElement(elem.id);
+    });
+
+    // Drag-to-reorder
+    tag.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', elem.id);
+      tag.classList.add('layer-tag-dragging');
+    });
+    tag.addEventListener('dragend', () => {
+      tag.classList.remove('layer-tag-dragging');
+    });
+    tag.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      tag.classList.add('layer-tag-dragover');
+    });
+    tag.addEventListener('dragleave', () => {
+      tag.classList.remove('layer-tag-dragover');
+    });
+    tag.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tag.classList.remove('layer-tag-dragover');
+      const draggedId = e.dataTransfer.getData('text/plain');
+      if (draggedId && draggedId !== elem.id) {
+        reorderLayer(draggedId, elem.id);
+      }
+    });
+
+    list.appendChild(tag);
+  });
+
+  layerPanelEl.appendChild(list);
+
+  // Footer: link button
+  const footer = ce('div', 'layer-footer');
+  footer.innerHTML = `
+    <button class="layer-link-btn ${linkMode ? 'active' : ''}" title="选两个元素建立链接">
+      ${linkMode ? '取消链接' : '建立链接'}
+    </button>
+  `;
+  footer.querySelector('.layer-link-btn').addEventListener('click', () => {
+    if (linkMode) {
+      linkMode = false;
+      linkFromId = null;
+      render();
+    } else {
+      if (elements.length < 2) {
+        showToast('至少需要两个元素才能建立链接', 'error');
+        return;
+      }
+      linkMode = true;
+      linkFromId = selectedId || elements[0]?.id;
+      showToast('点击画板上另一个元素完成链接', 'info');
+      render();
+    }
+  });
+  layerPanelEl.appendChild(footer);
+
+  // Existing links display
+  if (links.length > 0) {
+    const linksSection = ce('div', 'layer-links');
+    const title = ce('div', 'layer-links-title');
+    title.textContent = '已有链接';
+    linksSection.appendChild(title);
+
+    links.forEach((link, idx) => {
+      const fromEl = elements.find(e => e.id === link.fromId);
+      const toEl = elements.find(e => e.id === link.toId);
+      if (!fromEl || !toEl) return;
+
+      const item = ce('div', 'layer-link-item');
+      item.innerHTML = `
+        <span>${esc(trunc(fromEl.name, 5))} — ${esc(link.label || link.type)} — ${esc(trunc(toEl.name, 5))}</span>
+        <button class="layer-link-del" title="删除链接">\u00D7</button>
+      `;
+      item.querySelector('.layer-link-del').addEventListener('click', () => {
+        links.splice(idx, 1);
+        render();
+      });
+      linksSection.appendChild(item);
+    });
+    layerPanelEl.appendChild(linksSection);
+  }
 }
 
-/* ============ Selection ============ */
+/* ============ Layer Operations ============ */
 
-function selectChar(id) {
+function moveLayer(id, direction) {
+  const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+  const idx = sorted.findIndex(e => e.id === id);
+  if (idx < 0) return;
+
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= sorted.length) return;
+
+  // Swap z-indices
+  const tmp = sorted[idx].zIndex;
+  sorted[idx].zIndex = sorted[newIdx].zIndex;
+  sorted[newIdx].zIndex = tmp;
+  render();
+}
+
+function reorderLayer(draggedId, targetId) {
+  const dragged = elements.find(e => e.id === draggedId);
+  const target = elements.find(e => e.id === targetId);
+  if (!dragged || !target) return;
+
+  // Swap their z-indices
+  const tmp = dragged.zIndex;
+  dragged.zIndex = target.zIndex;
+  target.zIndex = tmp;
+  render();
+}
+
+function deleteElement(id) {
+  elements = elements.filter(e => e.id !== id);
+  links = links.filter(l => l.fromId !== id && l.toId !== id);
+  if (selectedId === id) selectedId = null;
+  // Reindex
+  elements.sort((a, b) => a.zIndex - b.zIndex).forEach((e, i) => e.zIndex = i);
+  render();
+}
+
+function selectElement(id) {
   selectedId = id;
-  boardEl.querySelectorAll('.char-box').forEach(b => {
-    b.classList.toggle('selected', b.dataset.id === id);
+  // Update board selection
+  boardEl?.querySelectorAll('.elem-box').forEach(box => {
+    box.classList.toggle('selected', box.dataset.id === id);
+  });
+  // Update layer panel selection
+  layerPanelEl?.querySelectorAll('.layer-tag').forEach(tag => {
+    tag.classList.toggle('layer-tag-active', tag.dataset.id === id);
+  });
+}
+
+function scrollToElement(id) {
+  const box = boardEl?.querySelector(`.elem-box[data-id="${id}"]`);
+  if (box) {
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Flash animation
+    box.classList.add('elem-flash');
+    setTimeout(() => box.classList.remove('elem-flash'), 600);
+  }
+}
+
+/* ============ Drag ============ */
+
+function startDrag(e, elem, boxEl) {
+  e.preventDefault();
+  const boardRect = boardEl.getBoundingClientRect();
+
+  dragState = {
+    id: elem.id,
+    startX: e.clientX,
+    startY: e.clientY,
+    origX: elem.x,
+    origY: elem.y,
+  };
+
+  const move = (ev) => {
+    const dx = ((ev.clientX - dragState.startX) / boardRect.width) * 100;
+    const dy = ((ev.clientY - dragState.startY) / boardRect.height) * 100;
+    elem.x = clamp(dragState.origX + dx, 5, 95);
+    elem.y = clamp(dragState.origY + dy, 5, 95);
+
+    boxEl.style.left = `${elem.x}%`;
+    boxEl.style.top = `${elem.y}%`;
+
+    // Show coords
+    showCoordTooltip(boxEl, elem.x, elem.y);
+
+    // Update link lines
+    renderLinkLines();
+  };
+
+  const up = () => {
+    dragState = null;
+    hideCoordTooltip(boxEl);
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+  };
+
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+}
+
+function showCoordTooltip(boxEl, x, y) {
+  let tip = boxEl.querySelector('.elem-box-coords');
+  if (!tip) {
+    tip = document.createElement('span');
+    tip.className = 'elem-box-coords';
+    boxEl.appendChild(tip);
+  }
+  tip.textContent = `(${Math.round(x)}, ${Math.round(y)})`;
+}
+
+function hideCoordTooltip(boxEl) {
+  boxEl?.querySelector('.elem-box-coords')?.remove();
+}
+
+/* ============ Links ============ */
+
+function completeLinkPick(toId) {
+  if (!linkFromId || linkFromId === toId) return;
+
+  // Check duplicate
+  const exists = links.some(l =>
+    (l.fromId === linkFromId && l.toId === toId) ||
+    (l.fromId === toId && l.toId === linkFromId)
+  );
+  if (exists) {
+    showToast('这两个元素已有链接', 'error');
+    linkMode = false;
+    linkFromId = null;
+    render();
+    return;
+  }
+
+  openLinkTypePicker(linkFromId, toId);
+}
+
+function openLinkTypePicker(fromId, toId) {
+  closeAllPopups();
+  const popup = ce('div', 'link-picker-popup');
+
+  const fromEl = elements.find(e => e.id === fromId);
+  const toEl = elements.find(e => e.id === toId);
+
+  popup.innerHTML = `
+    <div class="popup-title">${esc(fromEl?.name || '?')} \u2194 ${esc(toEl?.name || '?')}</div>
+    <div class="popup-options">
+      ${LINK_TYPES.map(lt => `<button class="popup-opt" data-type="${lt.type}">${lt.label}</button>`).join('')}
+    </div>
+  `;
+
+  popup.querySelectorAll('.popup-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.dataset.type;
+      let label = LINK_TYPES.find(t => t.type === type)?.label || type;
+
+      if (type === 'custom') {
+        const custom = prompt('输入自定义关系:');
+        if (!custom) { closeAllPopups(); linkMode = false; linkFromId = null; render(); return; }
+        label = custom;
+      }
+
+      links.push({
+        fromId,
+        toId,
+        type,
+        label,
+        color: LINK_COLORS[links.length % LINK_COLORS.length],
+      });
+
+      linkMode = false;
+      linkFromId = null;
+      closeAllPopups();
+      render();
+    });
+  });
+
+  boardEl.appendChild(popup);
+  // Position near center
+  popup.style.left = '50%';
+  popup.style.top = '50%';
+  popup.style.transform = 'translate(-50%, -50%)';
+}
+
+function renderLinkLines() {
+  if (!svgEl) return;
+  svgEl.innerHTML = '';
+
+  links.forEach(link => {
+    const fromEl = elements.find(e => e.id === link.fromId);
+    const toEl = elements.find(e => e.id === link.toId);
+    if (!fromEl || !toEl) return;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', `${fromEl.x}%`);
+    line.setAttribute('y1', `${fromEl.y}%`);
+    line.setAttribute('x2', `${toEl.x}%`);
+    line.setAttribute('y2', `${toEl.y}%`);
+    line.setAttribute('stroke', link.color || '#C3A6FF');
+    line.setAttribute('stroke-width', link.type === 'same-plane' ? '2.5' : '1.5');
+    line.setAttribute('stroke-dasharray', link.type === 'same-plane' ? '6,3' : 'none');
+    line.setAttribute('stroke-opacity', '0.5');
+    svgEl.appendChild(line);
+
+    // Label
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', `${(fromEl.x + toEl.x) / 2}%`);
+    text.setAttribute('y', `${(fromEl.y + toEl.y) / 2}%`);
+    text.setAttribute('fill', link.color || '#C3A6FF');
+    text.setAttribute('font-size', '10');
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('dy', '-4');
+    text.textContent = link.label;
+    svgEl.appendChild(text);
   });
 }
 
 /* ============ Edit Popup ============ */
 
-function openEditPopup(charId) {
+function openEditPopup(id) {
+  const elem = elements.find(e => e.id === id);
+  if (!elem) return;
+
   closeAllPopups();
-  const ch = characters.find(c => c.id === charId);
-  if (!ch) return;
+  selectElement(id);
 
-  selectChar(charId);
+  const popup = ce('div', 'edit-popup');
+  editPopupEl = popup;
 
-  const box = boardEl.querySelector(`.char-box[data-id="${charId}"]`);
-  if (!box) return;
+  const isChar = elem.type === 'character';
 
-  editPopupEl = document.createElement('div');
-  editPopupEl.className = 'char-edit-popup';
-
-  // Position near the box
-  const boxRect = box.getBoundingClientRect();
-  const boardRect = boardEl.getBoundingClientRect();
-  let popLeft = boxRect.right - boardRect.left + 8;
-  let popTop = boxRect.top - boardRect.top;
-  if (popLeft + 270 > boardRect.width) popLeft = boxRect.left - boardRect.left - 268;
-  if (popTop + 260 > boardRect.height) popTop = boardRect.height - 270;
-  popTop = Math.max(4, popTop);
-
-  editPopupEl.style.left = popLeft + 'px';
-  editPopupEl.style.top = popTop + 'px';
-
-  editPopupEl.innerHTML = `
-    <div class="form-group">
+  popup.innerHTML = `
+    <div class="popup-title">编辑${isChar ? '角色' : '景物'}</div>
+    <div class="popup-field">
       <label>名称</label>
-      <input type="text" id="edit-char-name" value="${escapeAttr(ch.name)}">
+      <input type="text" class="popup-input" data-key="name" value="${esc(elem.name)}">
     </div>
-    <div class="form-group">
-      <label>描述 / 提示词</label>
-      <textarea id="edit-char-desc">${escapeHtml(ch.prompt || ch.description)}</textarea>
+    <div class="popup-field">
+      <label>描述</label>
+      <textarea class="popup-textarea" data-key="description" rows="2">${esc(elem.description)}</textarea>
     </div>
-    <div class="form-group">
-      <label>角色</label>
-      <select id="edit-char-role" style="padding:6px 10px;border:1.5px solid var(--color-border);border-radius:var(--radius-sm);font-size:0.82rem;background:var(--color-bg-input)">
-        <option value="主角" ${ch.role === '主角' ? 'selected' : ''}>主角</option>
-        <option value="配角" ${ch.role === '配角' ? 'selected' : ''}>配角</option>
-        <option value="背景" ${ch.role === '背景' ? 'selected' : ''}>背景</option>
-      </select>
+    <div class="popup-field">
+      <label>提示词片段</label>
+      <textarea class="popup-textarea" data-key="prompt" rows="2" placeholder="该元素的具体提示词...">${esc(elem.prompt)}</textarea>
     </div>
-    <div class="char-edit-actions">
-      <button class="btn-text" id="edit-char-delete" style="color:var(--color-error)">删除</button>
-      <div style="display:flex;gap:var(--space-xs)">
-        ${characters.length > 1 ? `<button class="btn-secondary btn-sm" id="edit-char-bind">绑定关系</button>` : ''}
-        <button class="btn-primary btn-sm" id="edit-char-save">保存</button>
+    <div class="popup-field">
+      <label>层</label>
+      <div class="popup-layer-toggle">
+        <button class="popup-layer-btn ${elem.layer === 'foreground' ? 'active' : ''}" data-layer="foreground">前景</button>
+        <button class="popup-layer-btn ${elem.layer === 'background' ? 'active' : ''}" data-layer="background">后景</button>
       </div>
+    </div>
+    <div class="popup-field">
+      <label>类型</label>
+      <div class="popup-layer-toggle">
+        <button class="popup-type-btn ${elem.type === 'character' ? 'active' : ''}" data-type="character">人物</button>
+        <button class="popup-type-btn ${elem.type === 'object' ? 'active' : ''}" data-type="object">景物</button>
+      </div>
+    </div>
+    <div class="popup-field">
+      <label>焦点物品</label>
+      <input type="text" class="popup-input" data-key="focusPoint" value="${esc(elem.focusPoint || '')}" placeholder="如: 手中的信件">
+    </div>
+    <div class="popup-actions">
+      <button class="popup-delete">删除</button>
+      <button class="popup-close">完成</button>
     </div>
   `;
 
-  boardEl.appendChild(editPopupEl);
+  // Input changes
+  popup.querySelectorAll('.popup-input, .popup-textarea').forEach(input => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.key;
+      if (key) elem[key] = input.value;
+    });
+  });
 
-  // Stop clicks inside popup from propagating
-  editPopupEl.addEventListener('pointerdown', e => e.stopPropagation());
+  // Layer toggle
+  popup.querySelectorAll('.popup-layer-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      elem.layer = btn.dataset.layer;
+      popup.querySelectorAll('.popup-layer-btn').forEach(b => b.classList.toggle('active', b.dataset.layer === elem.layer));
+    });
+  });
 
-  // Save
-  editPopupEl.querySelector('#edit-char-save').addEventListener('click', () => {
-    ch.name = editPopupEl.querySelector('#edit-char-name').value.trim() || ch.name;
-    ch.prompt = editPopupEl.querySelector('#edit-char-desc').value.trim();
-    ch.description = ch.prompt;
-    ch.role = editPopupEl.querySelector('#edit-char-role').value;
-    render();
+  // Type toggle
+  popup.querySelectorAll('.popup-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      elem.type = btn.dataset.type;
+      popup.querySelectorAll('.popup-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === elem.type));
+    });
   });
 
   // Delete
-  editPopupEl.querySelector('#edit-char-delete').addEventListener('click', () => {
-    characters = characters.filter(c => c.id !== charId);
-    bindings = bindings.filter(b => b.fromId !== charId && b.toId !== charId);
-    selectedId = null;
+  popup.querySelector('.popup-delete').addEventListener('click', () => {
+    deleteElement(id);
+  });
+
+  // Close
+  popup.querySelector('.popup-close').addEventListener('click', () => {
+    closeAllPopups();
     render();
   });
 
-  // Bind
-  const bindBtn = editPopupEl.querySelector('#edit-char-bind');
-  if (bindBtn) {
-    bindBtn.addEventListener('click', () => {
-      closeAllPopups();
-      startBindingMode(charId);
-    });
+  // Position near the element
+  const box = boardEl.querySelector(`.elem-box[data-id="${id}"]`);
+  if (box) {
+    const boxRect = box.getBoundingClientRect();
+    const boardRect = boardEl.getBoundingClientRect();
+    const left = ((boxRect.right - boardRect.left) / boardRect.width) * 100;
+    popup.style.left = `${Math.min(left + 2, 60)}%`;
+    popup.style.top = `${((boxRect.top - boardRect.top) / boardRect.height) * 100}%`;
+  } else {
+    popup.style.left = '50%';
+    popup.style.top = '50%';
+    popup.style.transform = 'translate(-50%, -50%)';
   }
 
-  // Close on outside click
-  setTimeout(() => {
-    const closeHandler = (e) => {
-      if (editPopupEl && !editPopupEl.contains(e.target)) {
-        closeAllPopups();
-        document.removeEventListener('pointerdown', closeHandler);
-      }
-    };
-    document.addEventListener('pointerdown', closeHandler);
-  }, 50);
+  boardEl.appendChild(popup);
 }
 
-/* ============ Binding Mode ============ */
-
-function startBindingMode(fromId) {
-  bindingMode = true;
-  bindingFromId = fromId;
-  showToast('点击另一个角色建立关系', 'info');
-
-  // Visual feedback
-  boardEl.querySelectorAll('.char-box').forEach(b => {
-    if (b.dataset.id !== fromId) {
-      b.classList.add('bind-target');
-    }
-  });
-}
-
-function exitBindingMode() {
-  bindingMode = false;
-  bindingFromId = null;
-  boardEl?.querySelectorAll('.char-box').forEach(b => {
-    b.classList.remove('bind-target');
-  });
-}
-
-function openBindingPicker(fromId, toId, event) {
-  closeAllPopups();
-  exitBindingMode();
-
-  const fromChar = characters.find(c => c.id === fromId);
-  const toChar = characters.find(c => c.id === toId);
-  if (!fromChar || !toChar) return;
-
-  // Check for existing binding
-  const existing = bindings.find(b =>
-    (b.fromId === fromId && b.toId === toId) || (b.fromId === toId && b.toId === fromId)
-  );
-
-  bindingPickerEl = document.createElement('div');
-  bindingPickerEl.className = 'binding-picker';
-
-  const boardRect = boardEl.getBoundingClientRect();
-  bindingPickerEl.style.left = (event.clientX - boardRect.left + 8) + 'px';
-  bindingPickerEl.style.top = (event.clientY - boardRect.top) + 'px';
-
-  const title = document.createElement('div');
-  title.style.cssText = 'font-size:0.75rem;color:var(--color-text-tertiary);padding:4px 12px 8px;border-bottom:1px solid var(--color-border-light);margin-bottom:4px';
-  title.textContent = `${fromChar.name} ↔ ${toChar.name}`;
-  bindingPickerEl.appendChild(title);
-
-  BINDING_TYPES.forEach(bt => {
-    const opt = document.createElement('div');
-    opt.className = 'binding-option';
-    opt.textContent = bt.label;
-    opt.addEventListener('click', () => {
-      if (bt.type === 'custom') {
-        const customLabel = prompt('输入自定义关系：');
-        if (customLabel) {
-          addBinding(fromId, toId, 'custom', customLabel);
-        }
-      } else {
-        addBinding(fromId, toId, bt.type, bt.label);
-      }
-      closeAllPopups();
-    });
-    bindingPickerEl.appendChild(opt);
-  });
-
-  if (existing) {
-    const divider = document.createElement('div');
-    divider.style.cssText = 'height:1px;background:var(--color-border-light);margin:4px 0';
-    bindingPickerEl.appendChild(divider);
-
-    const removeOpt = document.createElement('div');
-    removeOpt.className = 'binding-option';
-    removeOpt.style.color = 'var(--color-error)';
-    removeOpt.textContent = '移除关系';
-    removeOpt.addEventListener('click', () => {
-      removeBinding(existing.id);
-      closeAllPopups();
-    });
-    bindingPickerEl.appendChild(removeOpt);
-  }
-
-  boardEl.appendChild(bindingPickerEl);
-
-  setTimeout(() => {
-    const closeHandler = (e) => {
-      if (bindingPickerEl && !bindingPickerEl.contains(e.target)) {
-        closeAllPopups();
-        document.removeEventListener('pointerdown', closeHandler);
-      }
-    };
-    document.addEventListener('pointerdown', closeHandler);
-  }, 50);
-}
-
-function addBinding(fromId, toId, type, label) {
-  // Remove existing binding between these two
-  bindings = bindings.filter(b =>
-    !((b.fromId === fromId && b.toId === toId) || (b.fromId === toId && b.toId === fromId))
-  );
-
-  bindings.push({
-    id: generateId(),
-    fromId,
-    toId,
-    type,
-    label,
-  });
-
-  render();
-}
-
-function removeBinding(bindId) {
-  bindings = bindings.filter(b => b.id !== bindId);
-  render();
-}
-
-/* ============ Binding Lines (SVG) ============ */
-
-function renderBindings() {
-  if (!svgEl) return;
-  svgEl.innerHTML = '';
-
-  bindings.forEach((bind, i) => {
-    const fromChar = characters.find(c => c.id === bind.fromId);
-    const toChar = characters.find(c => c.id === bind.toId);
-    if (!fromChar || !toChar) return;
-
-    const color = BIND_COLORS[i % BIND_COLORS.length];
-
-    // Calculate center points (percentage → SVG coordinates)
-    const x1 = fromChar.x;
-    const y1 = fromChar.y;
-    const x2 = toChar.x;
-    const y2 = toChar.y;
-
-    // Bezier control point for a slight curve
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    const offset = Math.min(len * 0.2, 8);
-    const cx = mx + (dy / len) * offset;
-    const cy = my - (dx / len) * offset;
-
-    // Line
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`);
-    path.setAttribute('stroke', color);
-    path.setAttribute('class', 'binding-line');
-    path.setAttribute('vector-effect', 'non-scaling-stroke');
-    path.style.pointerEvents = 'stroke';
-    svgEl.setAttribute('viewBox', '0 0 100 100');
-    svgEl.setAttribute('preserveAspectRatio', 'none');
-
-    path.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openBindingPicker(bind.fromId, bind.toId, e);
-    });
-
-    svgEl.appendChild(path);
-
-    // Label background + text
-    const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    const labelStr = bind.label || bind.type;
-
-    labelText.setAttribute('x', cx);
-    labelText.setAttribute('y', cy);
-    labelText.setAttribute('class', 'binding-label-text');
-    labelText.textContent = labelStr;
-
-    // Approximate label width (very rough)
-    const lblW = labelStr.length * 2.5 + 4;
-    const lblH = 4;
-    labelBg.setAttribute('x', cx - lblW / 2);
-    labelBg.setAttribute('y', cy - lblH / 2);
-    labelBg.setAttribute('width', lblW);
-    labelBg.setAttribute('height', lblH);
-    labelBg.setAttribute('class', 'binding-label-bg');
-
-    svgEl.appendChild(labelBg);
-    svgEl.appendChild(labelText);
-  });
-}
-
-/* ============ Popups ============ */
-
-function closeAllPopups() {
-  if (editPopupEl && editPopupEl.parentNode) {
-    editPopupEl.parentNode.removeChild(editPopupEl);
-  }
-  editPopupEl = null;
-
-  if (bindingPickerEl && bindingPickerEl.parentNode) {
-    bindingPickerEl.parentNode.removeChild(bindingPickerEl);
-  }
-  bindingPickerEl = null;
-
-  exitBindingMode();
-}
-
-/* ============ Helpers ============ */
-
-function clamp(val, min, max) {
-  return Math.max(min, Math.min(max, val));
-}
-
-function truncate(str, len) {
-  return str.length > len ? str.substring(0, len) + '...' : str;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function escapeAttr(str) {
-  return str.replace(/"/g, '&quot;').replace(/</g, '&lt;');
-}
-
-/* ============ Board Events (click-to-deselect + keyboard) ============ */
+/* ============ Board Events ============ */
 
 function setupBoardEvents() {
   if (!boardEl) return;
 
-  // Click on empty board area → deselect
+  // Click on empty area to deselect
   boardEl.addEventListener('pointerdown', (e) => {
     if (e.target === boardEl || e.target.classList.contains('canvas-crosshair-h') || e.target.classList.contains('canvas-crosshair-v')) {
       selectedId = null;
-      boardEl.querySelectorAll('.char-box').forEach(b => b.classList.remove('selected'));
+      if (linkMode) {
+        linkMode = false;
+        linkFromId = null;
+      }
       closeAllPopups();
+      render();
     }
   });
 
-  // Keyboard shortcuts
-  document.addEventListener('keydown', handleKeyboard);
-}
+  // Keyboard
+  document.addEventListener('keydown', (e) => {
+    if (!boardEl || !boardEl.offsetParent) return; // not visible
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-function handleKeyboard(e) {
-  if (!boardEl) return;
-
-  // Escape → exit binding mode
-  if (e.key === 'Escape') {
-    if (bindingMode) {
-      exitBindingMode();
-      e.preventDefault();
+    if (e.key === 'Escape') {
+      if (linkMode) {
+        linkMode = false;
+        linkFromId = null;
+        render();
+      } else {
+        selectedId = null;
+        closeAllPopups();
+        render();
+      }
     }
-    closeAllPopups();
-    return;
-  }
-
-  // Delete/Backspace → remove selected character (only when not in a text input)
-  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-    const active = document.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
-
-    characters = characters.filter(c => c.id !== selectedId);
-    bindings = bindings.filter(b => b.fromId !== selectedId && b.toId !== selectedId);
-    selectedId = null;
-    render();
-    e.preventDefault();
-  }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+      deleteElement(selectedId);
+    }
+  });
 }
 
-/* ============ Coordinate Tooltip ============ */
+/* ============ Helpers ============ */
 
-function showCoordTooltip(box, x, y) {
-  let tooltip = box.querySelector('.char-box-coords');
-  if (!tooltip) {
-    tooltip = document.createElement('div');
-    tooltip.className = 'char-box-coords';
-    box.appendChild(tooltip);
-  }
-  tooltip.textContent = `${Math.round(x)}, ${Math.round(y)}`;
+function ce(tag, className) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  return e;
 }
 
-function hideCoordTooltip(box) {
-  const tooltip = box.querySelector('.char-box-coords');
-  if (tooltip) tooltip.remove();
+function closeAllPopups() {
+  boardEl?.querySelectorAll('.edit-popup, .link-picker-popup').forEach(p => p.remove());
+  editPopupEl = null;
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+
+function trunc(str, max) {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max) + '...' : str;
+}
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
 }

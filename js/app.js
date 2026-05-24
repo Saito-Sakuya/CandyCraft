@@ -11,7 +11,7 @@ import { initRadar, updateRadarValues, destroyRadar } from './radar.js';
 import { renderSliders, getSliderValues, resetSliders, setValues, registerManualChangeCallback, destroySliders } from './sliders.js';
 import { renderPresets, clearActivePreset, destroyPresets } from './presets.js';
 import { initComposition, getAspectRatio } from './composition.js';
-import { initCanvas, updateCanvasAspect, getCanvasData, addCharacter, destroyCanvas } from './canvas.js';
+import { initCanvas, updateCanvasAspect, getCanvasData, addElement, destroyCanvas } from './canvas.js';
 import { initScene, getSceneData, destroyScene } from './scene.js';
 import { initStyleToggle, getStyle } from './style-toggle.js';
 import { initSettings } from './settings.js';
@@ -22,7 +22,7 @@ import { initHistory, addRecord, onSelectRecord } from './history.js';
 const state = {
   originalPrompt: '',
   dimensions: [],
-  characters: [],
+  elements: [],     // v3: combined characters + objects
   presets: [],
   optimizedPrompt: '',
   isAnalyzing: false,
@@ -48,7 +48,7 @@ function cacheDom() {
     btnOptimize:      $('btn-optimize'),
     canvasSection:    $('canvas-section'),
     canvasBoard:      $('canvas-board'),
-    btnAddChar:       $('btn-add-char'),
+    layerPanel:       $('layer-panel'),
     sceneSection:     $('scene-section'),
     sceneContainer:   $('scene-container'),
     radarSection:     $('radar-section'),
@@ -91,9 +91,6 @@ function init() {
   });
   els.btnCopy?.addEventListener('click', handleCopy);
   els.btnReoptimize?.addEventListener('click', handleOptimize);
-  els.btnAddChar?.addEventListener('click', () => {
-    addCharacter();
-  });
 
   // When user manually drags a slider, deselect active preset
   registerManualChangeCallback(() => {
@@ -176,7 +173,21 @@ async function handleAnalyze() {
     }
 
     state.dimensions = result.dimensions;
-    state.characters = result.characters || [];
+    // v3: merge characters + objects into elements (backward compat)
+    if (result.elements) {
+      state.elements = result.elements;
+    } else {
+      // Old format: characters only → map to elements
+      state.elements = (result.characters || []).map(c => ({
+        ...c,
+        type: 'character',
+        layer: c.role === '背景' ? 'background' : 'foreground',
+        x: c.position?.x ?? c.x ?? 50,
+        y: c.position?.y ?? c.y ?? 50,
+        w: c.size?.w ?? c.w ?? 18,
+        h: c.size?.h ?? c.h ?? 28,
+      }));
+    }
     state.presets = result.presets || [];
 
     // Render presets
@@ -191,8 +202,8 @@ async function handleAnalyze() {
     showEl(els.slidersSection);
     showEl(els.radarSection);
 
-    // Render character canvas
-    initCanvas('canvas-board', state.characters);
+    // Render element canvas with layer panel
+    initCanvas('canvas-board', 'layer-panel', state.elements);
     updateCanvasAspect(getAspectRatio());
     showEl(els.canvasSection);
 
@@ -261,8 +272,8 @@ async function handleOptimize() {
     const messages = buildOptimizeMessages(state.originalPrompt, {
       dimensions,
       composition,
-      characters: canvasData.characters,
-      bindings: canvasData.bindings,
+      elements: canvasData.elements,
+      links: canvasData.links,
       scene: sceneData,
       style: getStyle(),
     });

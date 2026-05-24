@@ -213,24 +213,22 @@
         <div class="card-header">
           <h2 class="card-title">
             <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-pink)"><use href="#icon-users"/></svg>
-            人物布局
+            画面布局
           </h2>
           <div id="composition-container" class="comp-selector"></div>
         </div>
 
-        <!-- Character Layout Board -->
-        <div id="canvas-board" class="canvas-board" data-ratio="16:9"></div>
+        <!-- Board + Layer Panel -->
+        <div class="canvas-layout">
+          <div id="canvas-board" class="canvas-board" data-ratio="16:9"></div>
+          <div id="layer-panel"></div>
+        </div>
 
         <!-- Canvas Toolbar -->
         <div class="canvas-toolbar">
-          <div class="canvas-toolbar-left">
-            <button id="btn-add-char" class="btn-secondary btn-sm">
-              <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:3px"><use href="#icon-plus"/></svg>
-              添加角色
-            </button>
-          </div>
+          <div class="canvas-toolbar-left"></div>
           <div class="canvas-toolbar-right">
-            <span style="font-size:0.7rem;color:var(--color-text-tertiary)">拖拽移动 / 点击编辑 / 绑定关系</span>
+            <span style="font-size:0.7rem;color:var(--color-text-tertiary)">拖拽移动 / 点击编辑 / 图层面板管理前后景</span>
           </div>
         </div>
       </div>
