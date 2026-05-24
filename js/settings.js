@@ -54,7 +54,9 @@ export function initSettings() {
 
   for (const radio of modeRadios) {
     radio.addEventListener('change', () => {
-      renderModeSection(getSelectedMode());
+      const mode = getSelectedMode();
+      renderModeSection(mode);
+      setApiConfig({ mode });
     });
   }
 
