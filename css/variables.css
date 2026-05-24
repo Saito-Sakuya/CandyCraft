@@ -80,15 +80,16 @@
 
 [data-theme="dark"] {
   --color-bg-page:   #16131F;
-  --color-bg-card:   #1E1A2E;
-  --color-bg-input:  #231F33;
+  --color-bg-card:   #1F1B2E;
+  --color-bg-input:  #26223A;
 
-  --color-text-primary:   #EEEAF8;
-  --color-text-secondary: #A09ABC;
-  --color-text-tertiary:  #6A6485;
+  /* Text: raised contrast to meet WCAG AA on dark backgrounds */
+  --color-text-primary:   #F0ECFF;   /* ~13:1 on bg-card */
+  --color-text-secondary: #C2BCDC;   /* ~7:1  on bg-card */
+  --color-text-tertiary:  #9990B8;   /* ~4.5:1 on bg-card */
 
-  --color-border:       #2E2A42;
-  --color-border-light: #262040;
+  --color-border:       #332E4A;
+  --color-border-light: #2B2640;
 
   --color-success: #7DDFC3;
   --color-error:   #FF6B8A;

@@ -120,6 +120,7 @@ ul, ol {
    Dark-mode element overrides
    ============================================ */
 
+/* ---- Inputs & Selects ---- */
 [data-theme="dark"] select,
 [data-theme="dark"] input[type="text"],
 [data-theme="dark"] input[type="password"],
@@ -130,39 +131,201 @@ ul, ol {
   border-color: var(--color-border);
 }
 
+[data-theme="dark"] textarea::placeholder,
+[data-theme="dark"] input::placeholder {
+  color: var(--color-text-tertiary);
+  opacity: 1;
+}
+
 [data-theme="dark"] option {
   background: var(--color-bg-card);
   color: var(--color-text-primary);
 }
 
-/* Header glass */
+/* ---- Header glass ---- */
 [data-theme="dark"] .app-header {
-  background: rgba(22, 19, 31, 0.88);
+  background: rgba(22, 19, 31, 0.9);
   border-bottom-color: var(--color-border);
 }
 
-/* Card backgrounds */
+/* ---- Cards ---- */
 [data-theme="dark"] .card,
 [data-theme="dark"] .guide-card,
-[data-theme="dark"] .light-card {
+[data-theme="dark"] .light-card,
+[data-theme="dark"] .history-item,
+[data-theme="dark"] .preset-card {
   background: var(--color-bg-card);
   border-color: var(--color-border);
 }
 
-/* Scene view grid lines */
+/* Hover backgrounds that use hardcoded #faf5ff */
+[data-theme="dark"] .btn-secondary:hover,
+[data-theme="dark"] .history-item:hover,
+[data-theme="dark"] .preset-card:hover {
+  background: rgba(195, 166, 255, 0.08);
+  border-color: var(--color-candy-lavender);
+}
+
+/* ---- Side panels ---- */
+[data-theme="dark"] .side-panel {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .side-panel-header {
+  border-bottom-color: var(--color-border);
+}
+
+/* ---- Result / Textarea backgrounds ---- */
+[data-theme="dark"] .result-content,
+[data-theme="dark"] .prompt-textarea,
+[data-theme="dark"] .prompt-output-area {
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+}
+
+/* ---- Scene view grid lines ---- */
+[data-theme="dark"] .scene-view {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+}
+
 [data-theme="dark"] .scene-view::before {
   background-image:
-    repeating-linear-gradient(0deg, transparent, transparent 14px, rgba(60, 55, 90, 0.5) 14px, rgba(60, 55, 90, 0.5) 15px),
-    repeating-linear-gradient(90deg, transparent, transparent 14px, rgba(60, 55, 90, 0.5) 14px, rgba(60, 55, 90, 0.5) 15px);
+    repeating-linear-gradient(0deg, transparent, transparent 14px, rgba(80, 70, 120, 0.4) 14px, rgba(80, 70, 120, 0.4) 15px),
+    repeating-linear-gradient(90deg, transparent, transparent 14px, rgba(80, 70, 120, 0.4) 14px, rgba(80, 70, 120, 0.4) 15px);
 }
 
-/* Prompt result area */
-[data-theme="dark"] .result-content {
+/* Scene controls — labels and pill buttons */
+[data-theme="dark"] .scene-control-label {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .scene-pill,
+[data-theme="dark"] .camera-preset,
+[data-theme="dark"] .lighting-preset,
+[data-theme="dark"] .aperture-option,
+[data-theme="dark"] .time-preset,
+[data-theme="dark"] .focal-option,
+[data-theme="dark"] .framing-option,
+[data-theme="dark"] .quality-option {
   background: var(--color-bg-input);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
 }
 
-/* Canvas board */
+[data-theme="dark"] .scene-pill:hover,
+[data-theme="dark"] .camera-preset:hover,
+[data-theme="dark"] .lighting-preset:hover,
+[data-theme="dark"] .aperture-option:hover,
+[data-theme="dark"] .time-preset:hover {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .scene-preset-desc {
+  color: var(--color-text-tertiary);
+}
+
+/* Scene view labels */
+[data-theme="dark"] .scene-view-label {
+  color: var(--color-text-tertiary);
+}
+
+/* Legend items */
+[data-theme="dark"] .scene-legend-item {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .scene-legend-axes span {
+  color: var(--color-text-tertiary);
+}
+
+/* ---- Light card overrides ---- */
+[data-theme="dark"] .light-card-header {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .light-card-off {
+  opacity: 0.6;
+}
+
+[data-theme="dark"] .light-type-select,
+[data-theme="dark"] .light-lm-input {
+  background: var(--color-bg-input);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .light-slider {
+  background: var(--color-border);
+}
+
+/* ---- Canvas board ---- */
 [data-theme="dark"] .canvas-board {
   background: var(--color-bg-card);
   border-color: var(--color-border);
+}
+
+/* Canvas element info boxes */
+[data-theme="dark"] .canvas-element-info,
+[data-theme="dark"] .elem-label {
+  color: var(--color-text-primary);
+}
+
+/* Layer panel */
+[data-theme="dark"] .layer-panel,
+[data-theme="dark"] .layer-item {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .layer-item:hover {
+  background: rgba(195, 166, 255, 0.08);
+}
+
+[data-theme="dark"] .layer-item.selected {
+  background: rgba(195, 166, 255, 0.15);
+}
+
+/* ---- Composition controls ---- */
+[data-theme="dark"] .composition-btn,
+[data-theme="dark"] .res-btn,
+[data-theme="dark"] .orient-btn {
+  background: var(--color-bg-input);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .composition-btn:hover,
+[data-theme="dark"] .res-btn:hover,
+[data-theme="dark"] .orient-btn:hover {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-text-primary);
+}
+
+/* ---- Slider component ---- */
+[data-theme="dark"] .slider-item {
+  border-bottom-color: var(--color-border);
+}
+
+[data-theme="dark"] .slider-range {
+  background: var(--color-border);
+}
+
+/* ---- Color temp buttons ---- */
+[data-theme="dark"] .color-temp-btn {
+  background: var(--color-bg-input);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .color-temp-btn:hover {
+  color: var(--color-text-primary);
+}
+
+/* ---- Scrollbar ---- */
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--color-border);
 }
