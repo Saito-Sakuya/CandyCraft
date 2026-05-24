@@ -22,7 +22,9 @@
 
 ## 项目简介
 
-Candy Craft 是一个纯前端的可视化生图提示词编辑工具，无需后端服务器，通过配置任意 OpenAI 兼容 API（如 GPT-4、Claude、本地部署模型等）即可使用。
+Candy Craft 是一个可视化生图提示词编辑工具，前端静态托管在 Cloudflare Pages，支持双模式 API 调用：
+- `后台托管`：通过同源 `Pages Functions` 代理 `/api/chat` 调用单一 OpenAI 兼容上游，浏览器侧不暴露密钥。
+- `用户自定义`：浏览器直连用户填写的 OpenAI 兼容端点（`Base URL + API Key + Model`）。
 
 ### 核心流程
 
@@ -66,19 +68,23 @@ intelligent-hawking/
 │   ├── scene.css           # 相机布光模块样式（三视图/灯卡片）
 │   └── animations.css      # 全局动画关键帧
 │
+├── functions/              # Cloudflare Pages Functions
+│   └── api/
+│       └── chat.js         # 同源 /api/chat 代理（SSE 透传 + 安全校验）
+│
 └── js/                     # ES Module 体系
     ├── app.js              # ★ 主入口，状态机，串联所有模块
     ├── prompt.js           # ★ 提示词引擎（分析/优化消息构建 + 响应解析）
     ├── scene.js            # ★ 相机布光（三视图/灯具系统/getSceneData）
     ├── canvas.js           # ★ 画板（元素拖拽/图层/链接/焦点）
-    ├── api.js              # HTTP 客户端（streamChat / OpenAI 兼容接口）
+    ├── api.js              # 前端 API 层（managed/custom 双通道路由）
     ├── composition.js      # 构图控制（比例/方向/分辨率）
     ├── sliders.js          # 维度滑杆组件
     ├── radar.js            # 雷达图（Chart.js 封装）
     ├── presets.js          # 预设方案卡片组件
     ├── style-toggle.js     # 动漫/写实程度滑杆（1-10档）
     ├── theme.js            # 夜间模式切换（OS偏好/localStorage）
-    ├── settings.js         # 设置面板（API Key/Base URL/Model）
+    ├── settings.js         # 设置面板（模式切换 + 托管/自定义配置 + 连通测试）
     ├── history.js          # 历史记录（localStorage 持久化）
     └── utils.js            # 工具函数（debounce/throttle/toast/showEl）
 ```
@@ -255,12 +261,12 @@ subjectLumens = lumens × 1 / (1 + 10 × distNorm²)
 
 ---
 
-#### `api.js` — HTTP 客户端
+#### `api.js` — 前端 API 层（双模式）
 
 ```js
-// OpenAI 兼容的流式请求
+// managed: 同源代理 /api/chat（无浏览器侧 Key）
+// custom: 直连 customBaseUrl/chat/completions（携带用户自定义 Key）
 streamChat(messages, { onChunk, onDone, onError, signal })
-// 支持任意 Base URL（本地 Ollama / LM Studio / 第三方 API 均可）
 ```
 
 ---
@@ -337,33 +343,47 @@ toggleTheme() // 切换并持久化
 
 ## 快速开始
 
-### 1. 部署静态文件
+### 1. 本地联调
 
-本项目为纯静态页面，**无需构建步骤**，任意静态服务器即可：
+本项目为静态页面 + Pages Functions，推荐使用 `wrangler` 联调：
 
 ```bash
-# 方案A：Python
-python -m http.server 8080
-
-# 方案B：Node
-npx serve .
-
-# 方案C：nginx / 任意 CDN 直接托管
+npx wrangler pages dev . --compatibility-date=2026-05-24
 ```
 
-### 2. 配置 API
+在本地根目录新增 `.dev.vars`（仅本地，勿提交）：
 
-点击页面左上角 **⚙️ 设置**，填写：
+```bash
+UPSTREAM_BASE_URL=https://api.openai.com/v1
+UPSTREAM_API_KEY=sk-xxxx
+DEFAULT_MODEL=gpt-4o
+```
 
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| API Base URL | OpenAI 兼容接口地址 | `https://api.openai.com/v1` |
-| API Key | 密钥（本地部署可填任意值） | `sk-...` |
-| 模型名称 | 模型标识符 | `gpt-4o` / `claude-3-5-sonnet` |
+### 2. 前端设置项（用户侧）
 
-> 支持所有 OpenAI 兼容接口：OpenAI、Anthropic（通过代理）、Ollama、LM Studio、Together AI、Groq 等。
+点击页面左上角 **⚙️ 设置** 后可选两种模式：
+- `后台托管`（默认）：只需填写模型名称（可留空，使用服务端 `DEFAULT_MODEL`）。
+- `用户自定义`：需填写 `Base URL + API Key + Model`，浏览器将直接请求你的上游端点。
 
-### 3. 使用流程
+> 自定义模式前置条件：上游端点必须允许浏览器跨域请求（CORS），否则会在浏览器侧被拦截。
+
+### 3. Cloudflare Pages 部署（GitHub 自动部署）
+
+1. 将仓库推送到 GitHub（`master` 作为生产分支）。
+2. Cloudflare Dashboard -> Workers & Pages -> Create -> Pages -> Connect to Git。
+3. 选择仓库后配置：
+   - Build command: 留空
+   - Build output directory: `/`（仓库根目录）
+   - Functions: 启用（`functions/` 自动生效）
+4. 在 Preview 与 Production 都配置变量：
+   - `UPSTREAM_BASE_URL`（例如 `https://api.openai.com/v1`）
+   - `UPSTREAM_API_KEY`（Secret）
+   - `DEFAULT_MODEL`（可选）
+5. 分支策略：
+   - `master` -> Production
+   - 其他分支 -> Preview
+
+### 4. 使用流程
 
 1. **输入提示词** → 在左侧文本框输入你的生图描述（中英文均可）
 2. **调节风格档** → 拖动 1-10 滑杆（1=纯动漫 10=照片级）
@@ -379,9 +399,32 @@ npx serve .
 6. **点击「优化提示词」** → 获得专业英文生图 prompt
 7. **复制结果** → 直接粘贴到 Midjourney / SD / Flux 等工具
 
+### 5. 运维与回滚
+
+- 代理日志默认输出：`requestId`、`status`、`latencyMs`、`upstreamStatus`（不记录 prompt 正文）。
+- Cloudflare Dashboard 建议为 `/api/chat` 增加按 IP 的 Rate Limiting 规则（函数内已做基础限流）。
+- 回滚方式：Pages -> Deployments -> 选择上一个成功部署 -> Promote to Production。
+
 ---
 
 ## 配置说明
+
+### 双模式 API 真值表
+
+| 模式 | 必填项 | 测试连接目标 | 请求路径 | 安全边界 |
+|------|--------|--------------|----------|----------|
+| 后台托管 (`managed`) | 无（模型可选） | `/api/chat` | 同源 `/api/chat` | 上游密钥仅在 Pages Secrets |
+| 用户自定义 (`custom`) | `Base URL` + `API Key` + `Model` | `${BaseURL}/chat/completions` | 浏览器直连 `${BaseURL}/chat/completions` | 密钥仅保存在当前浏览器 localStorage |
+
+### API 本地存储键
+
+| Key | 说明 |
+|-----|------|
+| `pc_api_mode` | 模式：`managed` / `custom` |
+| `pc_model_managed` | 托管模式模型名称 |
+| `pc_custom_base_url` | 自定义模式 Base URL |
+| `pc_custom_api_key` | 自定义模式 API Key |
+| `pc_custom_model` | 自定义模式模型名称 |
 
 ### 画布分辨率档位
 
@@ -413,6 +456,7 @@ npx serve .
 
 | 版本 | 主要变更 |
 |------|---------|
+| v3.6.0 | Cloudflare Pages Functions 代理上线：同源 `/api/chat`、浏览器侧移除 API Key/Base URL、新增部署说明 |
 | v3.5.2 | 夜间模式对比度修复（text-tertiary WCAG AA），全组件暗色覆盖 |
 | v3.5.1 | 修复 `createView is not defined` 崩溃 |
 | v3.5 | Prompt 审计修复：`posToSpatial` 5区间，same-plane 描述优化 |
@@ -436,8 +480,8 @@ npx serve .
 | 图表 | Chart.js | v4.5.1，CDN 引入，雷达图 |
 | 渲染 | marked.js | CDN 引入，Markdown 渲染 |
 | 字体 | Inter + LXGW WenKai Screen | Google Fonts + jsDelivr CDN |
-| API | OpenAI 兼容 | `fetch` + `ReadableStream` 流式响应 |
-| 存储 | localStorage | API 配置 + 历史记录 + 主题偏好 |
+| API | Pages Functions 代理 | 同源 `/api/chat` -> 上游 `/chat/completions`（SSE 透传） |
+| 存储 | localStorage | 模型偏好 + 历史记录 + 主题偏好 |
 | 版本 | Git | 本地 Git 仓库 |
 
 ---
