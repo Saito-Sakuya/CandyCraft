@@ -1,0 +1,468 @@
+/* ============================================
+   Scene — Three-View Panel + Camera + Lighting
+   ============================================ */
+
+/* ---- Three-View Container ---- */
+.scene-views {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-sm);
+}
+
+/* ---- Single View Panel ---- */
+.scene-view {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--color-bg-card);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Grid background */
+.scene-view::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 14px, rgba(240, 230, 240, 0.35) 14px, rgba(240, 230, 240, 0.35) 15px),
+    repeating-linear-gradient(90deg, transparent, transparent 14px, rgba(240, 230, 240, 0.35) 14px, rgba(240, 230, 240, 0.35) 15px);
+  pointer-events: none;
+}
+
+.scene-view-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Center subject indicator */
+.scene-subject {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 30%;
+  height: 35%;
+  border: 1.5px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: rgba(240, 230, 240, 0.15);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ---- Camera Indicator ---- */
+.scene-camera {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--gradient-primary);
+  border: 2px solid #fff;
+  box-shadow: var(--shadow-glow-pink);
+  cursor: grab;
+  touch-action: none;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  transition: box-shadow var(--transition-fast);
+}
+
+.scene-camera:hover {
+  box-shadow: 0 0 0 4px rgba(255, 143, 171, 0.2), var(--shadow-glow-pink);
+}
+
+.scene-camera.dragging {
+  cursor: grabbing;
+  box-shadow: 0 0 0 6px rgba(255, 143, 171, 0.25), var(--shadow-glow-pink);
+}
+
+.scene-camera svg {
+  width: 12px;
+  height: 12px;
+  color: #fff;
+  pointer-events: none;
+}
+
+/* Camera direction line */
+.scene-cam-line {
+  position: absolute;
+  width: 1px;
+  background: var(--color-candy-pink);
+  opacity: 0.4;
+  transform-origin: top center;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ---- Light Source Indicators ---- */
+.scene-light {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  cursor: grab;
+  touch-action: none;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  transition: box-shadow var(--transition-fast);
+}
+
+.scene-light svg {
+  width: 11px;
+  height: 11px;
+  color: #fff;
+  pointer-events: none;
+}
+
+.scene-light.dragging {
+  cursor: grabbing;
+}
+
+.scene-light[data-type="key"] {
+  background: var(--color-candy-lemon);
+  box-shadow: 0 0 10px rgba(255, 230, 109, 0.5);
+}
+
+.scene-light[data-type="fill"] {
+  background: var(--color-candy-sky);
+  box-shadow: 0 0 10px rgba(137, 207, 243, 0.4);
+}
+
+.scene-light[data-type="back"] {
+  background: var(--color-candy-peach);
+  box-shadow: 0 0 10px rgba(255, 185, 151, 0.4);
+}
+
+/* ---- Legend ---- */
+.scene-legend {
+  margin-top: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scene-legend-items {
+  display: flex;
+  gap: var(--space-md);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.scene-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
+}
+
+.scene-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  flex-shrink: 0;
+}
+
+.scene-legend-cam {
+  background: var(--gradient-primary);
+  box-shadow: 0 0 4px rgba(255, 143, 171, 0.4);
+}
+
+.scene-legend-key {
+  background: var(--color-candy-lemon);
+  box-shadow: 0 0 4px rgba(255, 230, 109, 0.4);
+}
+
+.scene-legend-fill {
+  background: var(--color-candy-sky);
+  box-shadow: 0 0 4px rgba(137, 207, 243, 0.4);
+}
+
+.scene-legend-back {
+  background: var(--color-candy-peach);
+  box-shadow: 0 0 4px rgba(255, 185, 151, 0.4);
+}
+
+.scene-legend-axes {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.scene-legend-axes span {
+  font-size: 0.58rem;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  flex: 1;
+}
+
+/* ---- Scene Controls ---- */
+.scene-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.scene-control-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.scene-control-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  min-width: 40px;
+  flex-shrink: 0;
+}
+
+/* ---- Aperture Selector ---- */
+.aperture-selector {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.aperture-option {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.aperture-option:hover {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-candy-lavender);
+}
+
+.aperture-option.active {
+  background: var(--gradient-primary);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--shadow-glow-pink);
+}
+
+.aperture-hint {
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary);
+  margin-left: 4px;
+}
+
+/* ---- Lighting Presets ---- */
+.lighting-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.lighting-preset {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.lighting-preset:hover {
+  border-color: var(--color-candy-lemon);
+  color: #a08b20;
+}
+
+.lighting-preset.active {
+  background: linear-gradient(135deg, var(--color-candy-lemon), var(--color-candy-peach));
+  color: #5c4a1a;
+  border-color: transparent;
+}
+
+/* ---- Camera Presets ---- */
+.camera-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.camera-preset {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.camera-preset:hover {
+  border-color: var(--color-candy-pink);
+}
+
+.camera-preset.active {
+  background: var(--gradient-primary);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* ---- Preset Description ---- */
+.scene-preset-desc {
+  font-size: 0.68rem;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  min-height: 1em;
+  padding-left: 48px;
+  transition: opacity var(--transition-fast);
+}
+
+/* ---- Static Light (non-draggable indicator in front/side views) ---- */
+.scene-light-static {
+  pointer-events: none;
+  border-width: 1.5px;
+}
+
+/* ---- Generic Scene Pill (reusable for focal/framing/quality) ---- */
+.scene-option-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.scene-pill {
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.68rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.scene-pill:hover {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-candy-lavender);
+}
+
+.scene-pill.active {
+  background: var(--gradient-secondary);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--shadow-glow-lavender);
+}
+
+/* ---- Color Temperature Selector ---- */
+.color-temp-wrap {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.color-temp-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.68rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.color-temp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-color, #ccc);
+  border: 1px solid rgba(0,0,0,0.08);
+  flex-shrink: 0;
+}
+
+.color-temp-btn:hover {
+  border-color: var(--dot-color, var(--color-candy-lavender));
+}
+
+.color-temp-btn.active {
+  border-color: var(--dot-color, var(--color-candy-lavender));
+  background: rgba(0,0,0,0.02);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--dot-color, #ccc) 30%, transparent);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+/* ---- Time of Day Presets ---- */
+.time-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.time-preset {
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-size: 0.68rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.time-preset:hover {
+  border-color: var(--color-candy-peach);
+  color: var(--color-candy-peach);
+}
+
+.time-preset.active {
+  background: linear-gradient(135deg, var(--color-candy-peach), var(--color-candy-lemon));
+  color: #5c4a1a;
+  border-color: transparent;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 640px) {
+  .scene-views {
+    grid-template-columns: 1fr;
+  }
+  .scene-view {
+    max-width: 200px;
+    margin: 0 auto;
+  }
+}

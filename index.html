@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PromptCraft — 提示词优化工坊</title>
+  <meta name="description" content="AI 驱动的可视化生图提示词优化工具。输入提示词，智能分析优化维度，可视化人物布局，相机布光控制，一键生成专业级生图指令。">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+
+  <!-- Design System CSS -->
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/canvas.css">
+  <link rel="stylesheet" href="css/scene.css">
+  <link rel="stylesheet" href="css/animations.css">
+
+  <!-- CDN: Chart.js for radar chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <!-- CDN: marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+</head>
+<body>
+
+  <!-- ========== Toast Container ========== -->
+  <div id="toast-container"></div>
+
+  <!-- ========== SVG Icon Definitions (hidden) ========== -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <defs>
+      <symbol id="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </symbol>
+      <symbol id="icon-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </symbol>
+      <symbol id="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </symbol>
+      <symbol id="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+        <line x1="1" y1="1" x2="23" y2="23"/>
+      </symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+      </symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </symbol>
+      <symbol id="icon-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
+      </symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </symbol>
+      <symbol id="icon-reset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="1 4 1 10 7 10"/>
+        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+      </symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </symbol>
+      <symbol id="icon-frame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <line x1="3" y1="9" x2="21" y2="9"/>
+        <line x1="9" y1="21" x2="9" y2="9"/>
+      </symbol>
+      <symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+        <circle cx="12" cy="13" r="4"/>
+      </symbol>
+      <symbol id="icon-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+      </symbol>
+      <symbol id="icon-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- ========== Settings Panel ========== -->
+  <div id="settings-overlay" class="overlay"></div>
+  <aside id="settings-panel" class="side-panel">
+    <div class="side-panel-header">
+      <h2>设置</h2>
+      <button id="close-settings" class="btn-icon" title="关闭">
+        <svg width="20" height="20"><use href="#icon-close"/></svg>
+      </button>
+    </div>
+    <div class="side-panel-body">
+      <div class="form-group">
+        <label for="api-base-url">API Base URL</label>
+        <input type="text" id="api-base-url" placeholder="https://api.openai.com/v1">
+      </div>
+      <div class="form-group">
+        <label for="api-key">API Key</label>
+        <div class="input-with-toggle">
+          <input type="password" id="api-key" placeholder="sk-...">
+          <button id="toggle-key-visibility" class="btn-icon" title="显示/隐藏">
+            <svg width="18" height="18"><use href="#icon-eye"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="model-name">模型名称</label>
+        <input type="text" id="model-name" placeholder="gpt-4o">
+      </div>
+      <div class="candy-stripe-bar"></div>
+      <button id="test-connection" class="btn-secondary btn-full">测试连接</button>
+      <button id="save-settings" class="btn-primary btn-full">保存设置</button>
+    </div>
+  </aside>
+
+  <!-- ========== History Panel ========== -->
+  <div id="history-overlay" class="overlay"></div>
+  <aside id="history-panel" class="side-panel side-panel-right">
+    <div class="side-panel-header">
+      <h2>历史记录</h2>
+      <button id="close-history" class="btn-icon" title="关闭">
+        <svg width="20" height="20"><use href="#icon-close"/></svg>
+      </button>
+    </div>
+    <div class="side-panel-body">
+      <div id="history-list"></div>
+      <button id="clear-history" class="btn-text" style="align-self:center;margin-top:auto">清空全部</button>
+    </div>
+  </aside>
+
+  <!-- ========== Header ========== -->
+  <header class="app-header">
+    <div class="header-left">
+      <button id="btn-settings" class="btn-icon" title="设置">
+        <svg width="20" height="20"><use href="#icon-settings"/></svg>
+      </button>
+    </div>
+    <div class="header-center">
+      <h1 class="brand">PromptCraft</h1>
+      <p class="brand-subtitle">提示词优化工坊</p>
+    </div>
+    <div class="header-right">
+      <div id="style-toggle"></div>
+      <button id="btn-history" class="btn-icon" title="历史记录">
+        <svg width="20" height="20"><use href="#icon-history"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========== Main Content (3 columns) ========== -->
+  <main class="app-main">
+
+    <!-- ===== Left Column: Input & Controls ===== -->
+    <section class="panel panel-input">
+
+      <!-- Prompt Input Card -->
+      <div class="card fade-in">
+        <h2 class="card-title">
+          <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-lavender)"><use href="#icon-search"/></svg>
+          输入提示词
+        </h2>
+        <textarea id="prompt-input" class="prompt-textarea" placeholder="在这里输入你的生图提示词，例如：&#10;一只白色的猫坐在窗台上，窗外是雨天的城市…"></textarea>
+        <button id="btn-analyze" class="btn-primary btn-full">
+          <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
+          分析提示词
+        </button>
+      </div>
+
+      <!-- Presets Card (hidden until analysis) -->
+      <div id="presets-section" class="card" style="display:none">
+        <h2 class="card-title">预设方案</h2>
+        <div id="presets-container" class="presets-row"></div>
+      </div>
+
+      <!-- Sliders Card (hidden until analysis) -->
+      <div id="sliders-section" class="card" style="display:none">
+        <div class="card-header">
+          <h2 class="card-title">调节维度</h2>
+          <button id="btn-reset-sliders" class="btn-text">
+            <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:4px"><use href="#icon-reset"/></svg>
+            重置
+          </button>
+        </div>
+        <div id="sliders-container"></div>
+        <div class="candy-stripe-bar"></div>
+        <button id="btn-optimize" class="btn-primary btn-full" style="margin-top:var(--space-md)">
+          <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
+          优化提示词
+        </button>
+      </div>
+
+    </section>
+
+    <!-- ===== Center Column: Canvas & Scene ===== -->
+    <section class="panel panel-canvas">
+
+      <!-- Composition + Canvas Card -->
+      <div id="canvas-section" class="card" style="display:none">
+        <div class="card-header">
+          <h2 class="card-title">
+            <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-pink)"><use href="#icon-users"/></svg>
+            人物布局
+          </h2>
+          <div id="composition-container" class="comp-selector"></div>
+        </div>
+
+        <!-- Character Layout Board -->
+        <div id="canvas-board" class="canvas-board" data-ratio="16:9"></div>
+
+        <!-- Canvas Toolbar -->
+        <div class="canvas-toolbar">
+          <div class="canvas-toolbar-left">
+            <button id="btn-add-char" class="btn-secondary btn-sm">
+              <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:3px"><use href="#icon-plus"/></svg>
+              添加角色
+            </button>
+          </div>
+          <div class="canvas-toolbar-right">
+            <span style="font-size:0.7rem;color:var(--color-text-tertiary)">拖拽移动 / 点击编辑 / 绑定关系</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scene Three-View Card -->
+      <div id="scene-section" class="card" style="display:none">
+        <h2 class="card-title">
+          <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-sky)"><use href="#icon-camera"/></svg>
+          相机与布光
+        </h2>
+        <div id="scene-container"></div>
+      </div>
+
+    </section>
+
+    <!-- ===== Right Column: Radar & Results ===== -->
+    <section class="panel panel-output">
+
+      <!-- Radar Chart Card -->
+      <div id="radar-section" class="card" style="display:none">
+        <h2 class="card-title">维度雷达图</h2>
+        <div class="radar-wrapper">
+          <canvas id="radar-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Result Card -->
+      <div id="result-section" class="card" style="display:none">
+        <div class="card-header">
+          <h2 class="card-title">优化结果</h2>
+          <div class="card-actions">
+            <button id="btn-copy" class="btn-secondary btn-sm">
+              <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:3px"><use href="#icon-copy"/></svg>
+              复制
+            </button>
+            <button id="btn-reoptimize" class="btn-secondary btn-sm">
+              <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:3px"><use href="#icon-refresh"/></svg>
+              重新优化
+            </button>
+          </div>
+        </div>
+        <div id="result-content" class="result-content"></div>
+      </div>
+
+      <!-- Loading State -->
+      <div id="loading-section" class="card" style="display:none">
+        <div class="loading-content">
+          <div class="loading-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <p id="loading-text" class="loading-text">正在分析提示词...</p>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Application Scripts (ES Modules) -->
+  <script type="module" src="js/app.js"></script>
+
+</body>
+</html>

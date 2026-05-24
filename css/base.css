@@ -1,0 +1,116 @@
+/* ============================================
+   Base Styles & Reset
+   Fonts, reset, global defaults
+   ============================================ */
+
+/* ---- Font Imports ---- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-web/style.css');
+
+/* ---- Reset ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  background: var(--gradient-candy-bg);
+  background-attachment: fixed;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ---- Candy Wrapper Diagonal Stripes (page-level texture) ---- */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 12px,
+    rgba(255, 143, 171, 0.035) 12px,
+    rgba(255, 143, 171, 0.035) 24px,
+    transparent 24px,
+    transparent 36px,
+    rgba(195, 166, 255, 0.035) 36px,
+    rgba(195, 166, 255, 0.035) 48px
+  );
+}
+
+/* ---- Links ---- */
+a {
+  color: var(--color-candy-sky);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--color-candy-lavender);
+}
+
+/* ---- Inherited Font ---- */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---- Images ---- */
+img, svg {
+  max-width: 100%;
+  display: block;
+}
+
+/* ---- Lists ---- */
+ul, ol {
+  list-style: none;
+}
+
+/* ---- Selection ---- */
+::selection {
+  background: rgba(255, 143, 171, 0.25);
+  color: var(--color-text-primary);
+}
+
+/* ---- Scrollbar (WebKit) ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-candy-lavender);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}

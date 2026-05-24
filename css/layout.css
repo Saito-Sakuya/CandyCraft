@@ -1,0 +1,222 @@
+/* ============================================
+   Layout
+   Header, main grid, panels, responsive
+   ============================================ */
+
+/* ---- Header ---- */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-xl);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* Candy stripe accent bar under header */
+.app-header::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-candy-pink) 0px,
+    var(--color-candy-pink) 8px,
+    var(--color-candy-lavender) 8px,
+    var(--color-candy-lavender) 16px,
+    var(--color-candy-mint) 16px,
+    var(--color-candy-mint) 24px,
+    var(--color-candy-peach) 24px,
+    var(--color-candy-peach) 32px,
+    var(--color-candy-sky) 32px,
+    var(--color-candy-sky) 40px
+  );
+  opacity: 0.6;
+}
+
+.header-left,
+.header-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.header-center {
+  flex: 1;
+  text-align: center;
+}
+
+.brand {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.3;
+}
+
+.brand-subtitle {
+  font-size: 0.78rem;
+  color: var(--color-text-tertiary);
+  margin-top: 1px;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Main Content Grid (3 columns) ---- */
+.app-main {
+  display: grid;
+  grid-template-columns: 320px 1fr 360px;
+  gap: var(--space-lg);
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: var(--space-lg) var(--space-xl);
+  position: relative;
+  z-index: 1;
+}
+
+.panel-input,
+.panel-canvas,
+.panel-output {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.panel-input {
+  min-width: 0;
+}
+
+.panel-canvas {
+  min-width: 0;
+}
+
+.panel-output {
+  min-width: 0;
+}
+
+/* ---- Overlay (backdrop for side panels) ---- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(45, 43, 61, 0.25);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-slow), visibility var(--transition-slow);
+  z-index: var(--z-overlay);
+}
+
+.overlay.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ---- Side Panels (settings, history) ---- */
+.side-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 380px;
+  max-width: 90vw;
+  background: var(--color-bg-card);
+  transform: translateX(-100%);
+  transition: transform var(--transition-slow);
+  z-index: var(--z-panel);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.side-panel.side-panel-right {
+  left: auto;
+  right: 0;
+  transform: translateX(100%);
+}
+
+.side-panel.open {
+  transform: translateX(0);
+}
+
+.side-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.side-panel-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.side-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 1280px) {
+  .app-main {
+    grid-template-columns: 300px 1fr;
+    /* Canvas and output stack in the right column */
+  }
+
+  .panel-canvas {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-main {
+    grid-template-columns: 1fr;
+    padding: var(--space-md);
+    gap: var(--space-md);
+  }
+
+  .panel-canvas {
+    order: 2;
+  }
+
+  .panel-output {
+    order: 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .brand {
+    font-size: 1.2rem;
+  }
+
+  .brand-subtitle {
+    font-size: 0.7rem;
+  }
+
+  .side-panel {
+    width: 100%;
+    max-width: 100vw;
+  }
+}

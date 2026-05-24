@@ -1,0 +1,335 @@
+/* ============================================
+   Canvas — Character Layout Board Styles
+   Draggable character boxes, bindings, toolbar
+   ============================================ */
+
+/* ---- Board Container ---- */
+.canvas-board {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--color-bg-card);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: aspect-ratio var(--transition-slow);
+  cursor: crosshair;
+}
+
+.canvas-board[data-ratio="16:9"] { aspect-ratio: 16 / 9; }
+.canvas-board[data-ratio="9:16"] { aspect-ratio: 9 / 16; max-height: 520px; }
+.canvas-board[data-ratio="1:1"]  { aspect-ratio: 1 / 1; }
+
+/* Grid background */
+.canvas-board::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(240, 230, 240, 0.4) 19px, rgba(240, 230, 240, 0.4) 20px),
+    repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(240, 230, 240, 0.4) 19px, rgba(240, 230, 240, 0.4) 20px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Center crosshair */
+.canvas-crosshair-h,
+.canvas-crosshair-v {
+  position: absolute;
+  background: var(--color-candy-pink);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.canvas-crosshair-h {
+  left: 0; right: 0;
+  top: 50%;
+  height: 1px;
+}
+
+.canvas-crosshair-v {
+  top: 0; bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+/* Rule of thirds guides */
+.canvas-third {
+  position: absolute;
+  background: var(--color-candy-lavender);
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---- Character Box ---- */
+.char-box {
+  position: absolute;
+  border: 2px solid var(--color-candy-lavender);
+  border-radius: var(--radius-md);
+  background: rgba(195, 166, 255, 0.06);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+  z-index: 2;
+  min-width: 50px;
+  min-height: 60px;
+}
+
+.char-box:hover {
+  border-color: var(--color-candy-pink);
+  background: rgba(255, 143, 171, 0.08);
+  box-shadow: 0 2px 12px rgba(255, 143, 171, 0.15);
+}
+
+.char-box.selected {
+  border-color: var(--color-candy-pink);
+  border-width: 2.5px;
+  background: rgba(255, 143, 171, 0.1);
+  box-shadow: 0 0 0 3px rgba(255, 143, 171, 0.15), var(--shadow-md);
+  z-index: 3;
+}
+
+.char-box.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+}
+
+.char-box-role {
+  font-size: 0.6rem;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.char-box-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: center;
+  line-height: 1.2;
+  padding: 0 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.char-box-desc {
+  font-size: 0.6rem;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+/* Edit button — top-right corner */
+.char-box-edit {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--gradient-primary);
+  border: 2px solid #fff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  z-index: 5;
+}
+
+.char-box:hover .char-box-edit,
+.char-box.selected .char-box-edit {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.char-box-edit svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Binding mode indicator */
+.char-box.bind-target {
+  border-style: dashed;
+  animation: pulse 1s infinite;
+}
+
+/* ---- Binding SVG Overlay ---- */
+.binding-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.binding-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.binding-line:hover {
+  stroke-width: 3;
+}
+
+.binding-label-bg {
+  fill: var(--color-bg-card);
+  rx: 6;
+  ry: 6;
+}
+
+.binding-label-text {
+  font-size: 10px;
+  font-family: var(--font-sans);
+  fill: var(--color-text-secondary);
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+/* ---- Character Edit Popup ---- */
+.char-edit-popup {
+  position: absolute;
+  width: 260px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-md);
+  z-index: 20;
+  animation: scaleIn 0.2s ease;
+}
+
+.char-edit-popup .form-group {
+  margin-bottom: var(--space-sm);
+}
+
+.char-edit-popup .form-group:last-child {
+  margin-bottom: 0;
+}
+
+.char-edit-popup input,
+.char-edit-popup textarea {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  background: var(--color-bg-input);
+}
+
+.char-edit-popup textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.char-edit-popup input:focus,
+.char-edit-popup textarea:focus {
+  outline: none;
+  border-color: var(--color-candy-lavender);
+}
+
+.char-edit-popup label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 2px;
+  display: block;
+}
+
+.char-edit-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-sm);
+}
+
+/* ---- Canvas Toolbar ---- */
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) 0;
+  gap: var(--space-sm);
+}
+
+.canvas-toolbar-left,
+.canvas-toolbar-right {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+/* ---- Binding Relationship Picker ---- */
+.binding-picker {
+  position: absolute;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-sm);
+  z-index: 25;
+  animation: scaleIn 0.15s ease;
+  min-width: 180px;
+}
+
+.binding-option {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--color-text-primary);
+  transition: background var(--transition-fast);
+}
+
+.binding-option:hover {
+  background: rgba(195, 166, 255, 0.1);
+}
+
+.binding-colors {
+  --bind-color-0: #FF8FAB;
+  --bind-color-1: #C3A6FF;
+  --bind-color-2: #7DDFC3;
+  --bind-color-3: #FFB997;
+  --bind-color-4: #89CFF3;
+}
+
+/* ---- Coordinate Tooltip (shows during drag) ---- */
+.char-box-coords {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(45, 43, 61, 0.8);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+}
+

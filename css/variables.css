@@ -1,0 +1,73 @@
+/* ============================================
+   PromptCraft Design Tokens
+   Candy color system + spacing + typography
+   ============================================ */
+
+:root {
+  /* ---- Candy Palette ---- */
+  --color-candy-pink: #FF8FAB;
+  --color-candy-lavender: #C3A6FF;
+  --color-candy-mint: #7DDFC3;
+  --color-candy-peach: #FFB997;
+  --color-candy-sky: #89CFF3;
+  --color-candy-lemon: #FFE66D;
+
+  /* ---- Semantic Colors ---- */
+  --color-bg-page: #FFF5F7;
+  --color-bg-card: #FFFFFF;
+  --color-bg-input: #FDFAFF;
+  --color-text-primary: #2D2B3D;
+  --color-text-secondary: #6B6880;
+  --color-text-tertiary: #9994B0;
+  --color-border: #F0E6F0;
+  --color-border-light: #F8F0F8;
+  --color-success: #7DDFC3;
+  --color-error: #FF6B8A;
+  --color-info: #89CFF3;
+
+  /* ---- Gradients ---- */
+  --gradient-primary: linear-gradient(135deg, #FF8FAB, #C3A6FF);
+  --gradient-secondary: linear-gradient(135deg, #C3A6FF, #89CFF3);
+  --gradient-warm: linear-gradient(135deg, #FFB997, #FF8FAB);
+  --gradient-cool: linear-gradient(135deg, #89CFF3, #7DDFC3);
+  --gradient-candy-bg: linear-gradient(160deg, #FFF5F7 0%, #F5F0FF 50%, #F0F8FF 100%);
+
+  /* ---- Spacing ---- */
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 40px;
+  --space-3xl: 48px;
+
+  /* ---- Border Radius ---- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* ---- Shadows ---- */
+  --shadow-sm: 0 2px 8px rgba(45, 43, 61, 0.06);
+  --shadow-md: 0 4px 16px rgba(45, 43, 61, 0.08);
+  --shadow-lg: 0 8px 32px rgba(45, 43, 61, 0.12);
+  --shadow-glow-pink: 0 4px 20px rgba(255, 143, 171, 0.3);
+  --shadow-glow-lavender: 0 4px 20px rgba(195, 166, 255, 0.3);
+
+  /* ---- Typography ---- */
+  --font-sans: 'Inter', 'LXGW WenKai Screen', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', 'Consolas', monospace;
+
+  /* ---- Transitions ---- */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- Z-index Scale ---- */
+  --z-header: 100;
+  --z-overlay: 900;
+  --z-panel: 950;
+  --z-toast: 1000;
+}
