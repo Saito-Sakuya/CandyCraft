@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PromptCraft — 提示词优化工坊</title>
+  <title>Candy Craft — AI 提示词可视化优化</title>
   <meta name="description" content="AI 驱动的可视化生图提示词优化工具。输入提示词，智能分析优化维度，可视化人物布局，相机布光控制，一键生成专业级生图指令。">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 
@@ -150,8 +150,8 @@
       </button>
     </div>
     <div class="header-center">
-      <h1 class="brand">PromptCraft</h1>
-      <p class="brand-subtitle">提示词优化工坊</p>
+      <h1 class="brand">Candy Craft</h1>
+      <p class="brand-subtitle">AI 提示词可视化优化</p>
     </div>
     <div class="header-right">
       <div id="style-toggle"></div>
@@ -178,6 +178,34 @@
           <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
           分析提示词
         </button>
+      </div>
+
+      <!-- Guide Cards (visible on page load, hidden on analyze) -->
+      <div id="guide-cards" class="guide-cards fade-in">
+        <div class="guide-card guide-card-style">
+          <div class="guide-card-title">风格档位参考</div>
+          <div class="guide-table">
+            <div class="guide-row"><span class="guide-level">1-2</span><span class="guide-desc">纯赛璐珞动漫 — 平涂色块、粗线稿</span></div>
+            <div class="guide-row"><span class="guide-level">3</span><span class="guide-desc">动漫插画 — 柔和着色、插画构图</span></div>
+            <div class="guide-row"><span class="guide-level">4</span><span class="guide-desc">风格化插画 — 绘画质感 + 光影层次</span></div>
+            <div class="guide-row"><span class="guide-level">5</span><span class="guide-desc">平衡混合 — 写实比例 + 绘画笔触</span></div>
+            <div class="guide-row"><span class="guide-level">6</span><span class="guide-desc">半写实 — 细腻渲染、真实光影</span></div>
+            <div class="guide-row"><span class="guide-level">7</span><span class="guide-desc">偏写实 — CG 质感、电影光影</span></div>
+            <div class="guide-row"><span class="guide-level">8</span><span class="guide-desc">写实 CG — 高精度渲染、电影调色</span></div>
+            <div class="guide-row"><span class="guide-level">9-10</span><span class="guide-desc">照片级写实 — DSLR / 8K / 物理光照</span></div>
+          </div>
+        </div>
+        <div class="guide-card guide-card-ops">
+          <div class="guide-card-title">操作说明</div>
+          <div class="guide-steps">
+            <div class="guide-step"><span class="guide-num">1</span>输入你的生图提示词</div>
+            <div class="guide-step"><span class="guide-num">2</span>调节右上角风格滑块（动漫 ~ 写实）</div>
+            <div class="guide-step"><span class="guide-num">3</span>点击分析 → AI 自动生成调节维度</div>
+            <div class="guide-step"><span class="guide-num">4</span>拖动滑块 / 选预设 / 调整画面布局</div>
+            <div class="guide-step"><span class="guide-num">5</span>设置相机、焦距、布光参数</div>
+            <div class="guide-step"><span class="guide-num">6</span>点击优化 → 获得专业提示词</div>
+          </div>
+        </div>
       </div>
 
       <!-- Presets Card (hidden until analysis) -->

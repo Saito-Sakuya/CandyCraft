@@ -20,7 +20,7 @@
   background: var(--color-bg-card);
   border: 2px solid var(--color-border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow: visible;
   transition: aspect-ratio var(--transition-slow);
   cursor: crosshair;
 }
@@ -222,8 +222,8 @@
 
 /* ---- Edit Popup ---- */
 .edit-popup {
-  position: absolute;
-  z-index: 100;
+  position: fixed;
+  z-index: 9999;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -343,8 +343,8 @@
 
 /* ---- Link Picker Popup ---- */
 .link-picker-popup {
-  position: absolute;
-  z-index: 100;
+  position: fixed;
+  z-index: 9999;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);

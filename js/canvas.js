@@ -17,6 +17,7 @@ let linkMode = false;
 let linkFromId = null;
 let editPopupEl = null;
 let dragState = null;
+let outsideHandler = null;  // click-outside listener ref
 
 const LINK_TYPES = [
   { type: 'same-plane', label: '同一平面' },
@@ -539,11 +540,12 @@ function openLinkTypePicker(fromId, toId) {
     });
   });
 
-  boardEl.appendChild(popup);
-  // Position near center
-  popup.style.left = '50%';
-  popup.style.top = '50%';
-  popup.style.transform = 'translate(-50%, -50%)';
+  document.body.appendChild(popup);
+  // Position in viewport center
+  const boardRect = boardEl.getBoundingClientRect();
+  popup.style.left = `${boardRect.left + boardRect.width / 2 - 100}px`;
+  popup.style.top = `${boardRect.top + boardRect.height / 2 - 100}px`;
+  registerOutsideClose(popup);
 }
 
 function renderLinkLines() {
@@ -666,21 +668,26 @@ function openEditPopup(id) {
     render();
   });
 
-  // Position near the element
+  // Position near the element using fixed viewport coords
   const box = boardEl.querySelector(`.elem-box[data-id="${id}"]`);
   if (box) {
     const boxRect = box.getBoundingClientRect();
-    const boardRect = boardEl.getBoundingClientRect();
-    const left = ((boxRect.right - boardRect.left) / boardRect.width) * 100;
-    popup.style.left = `${Math.min(left + 2, 60)}%`;
-    popup.style.top = `${((boxRect.top - boardRect.top) / boardRect.height) * 100}%`;
+    let left = boxRect.right + 8;
+    let top = boxRect.top;
+    // Keep within viewport
+    if (left + 240 > window.innerWidth) left = boxRect.left - 248;
+    if (top + 400 > window.innerHeight) top = window.innerHeight - 410;
+    if (top < 10) top = 10;
+    popup.style.left = `${left}px`;
+    popup.style.top = `${top}px`;
   } else {
     popup.style.left = '50%';
     popup.style.top = '50%';
     popup.style.transform = 'translate(-50%, -50%)';
   }
 
-  boardEl.appendChild(popup);
+  document.body.appendChild(popup);
+  registerOutsideClose(popup);
 }
 
 /* ============ Board Events ============ */
@@ -733,7 +740,25 @@ function ce(tag, className) {
 
 function closeAllPopups() {
   boardEl?.querySelectorAll('.edit-popup, .link-picker-popup').forEach(p => p.remove());
+  document.querySelectorAll('body > .edit-popup, body > .link-picker-popup').forEach(p => p.remove());
   editPopupEl = null;
+  if (outsideHandler) {
+    document.removeEventListener('pointerdown', outsideHandler, true);
+    outsideHandler = null;
+  }
+}
+
+function registerOutsideClose(popupEl) {
+  // Delay to avoid catching the same click that opened the popup
+  setTimeout(() => {
+    outsideHandler = (e) => {
+      if (!popupEl.contains(e.target)) {
+        closeAllPopups();
+        render();
+      }
+    };
+    document.addEventListener('pointerdown', outsideHandler, true);
+  }, 50);
 }
 
 function esc(str) {

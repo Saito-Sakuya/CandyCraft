@@ -58,6 +58,7 @@ function cacheDom() {
     btnReoptimize:    $('btn-reoptimize'),
     loadingSection:   $('loading-section'),
     loadingText:      $('loading-text'),
+    guideCards:       $('guide-cards'),
   };
 }
 
@@ -150,6 +151,11 @@ async function handleAnalyze() {
   hideEl(els.sceneSection);
   hideEl(els.radarSection);
   hideEl(els.resultSection);
+  // Fade out guide cards
+  if (els.guideCards) {
+    els.guideCards.classList.add('hiding');
+    setTimeout(() => { els.guideCards.style.display = 'none'; }, 400);
+  }
   els.btnAnalyze.disabled = true;
   els.btnAnalyze.innerHTML = '<svg width="16" height="16" class="spin"><use href="#icon-refresh"/></svg> 分析中...';
 
