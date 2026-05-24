@@ -31,6 +31,7 @@ body {
   background-attachment: fixed;
   min-height: 100vh;
   overflow-x: hidden;
+  transition: background 0.4s ease, color 0.3s ease;
 }
 
 /* ---- Candy Wrapper Diagonal Stripes (page-level texture) ---- */
@@ -113,4 +114,55 @@ ul, ol {
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
+}
+
+/* ============================================
+   Dark-mode element overrides
+   ============================================ */
+
+[data-theme="dark"] select,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] textarea {
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] option {
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+/* Header glass */
+[data-theme="dark"] .app-header {
+  background: rgba(22, 19, 31, 0.88);
+  border-bottom-color: var(--color-border);
+}
+
+/* Card backgrounds */
+[data-theme="dark"] .card,
+[data-theme="dark"] .guide-card,
+[data-theme="dark"] .light-card {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+}
+
+/* Scene view grid lines */
+[data-theme="dark"] .scene-view::before {
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 14px, rgba(60, 55, 90, 0.5) 14px, rgba(60, 55, 90, 0.5) 15px),
+    repeating-linear-gradient(90deg, transparent, transparent 14px, rgba(60, 55, 90, 0.5) 14px, rgba(60, 55, 90, 0.5) 15px);
+}
+
+/* Prompt result area */
+[data-theme="dark"] .result-content {
+  background: var(--color-bg-input);
+}
+
+/* Canvas board */
+[data-theme="dark"] .canvas-board {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
 }

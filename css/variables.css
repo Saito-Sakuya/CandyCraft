@@ -71,3 +71,32 @@
   --z-panel: 950;
   --z-toast: 1000;
 }
+
+/* ============================================
+   Dark Theme — [data-theme="dark"]
+   Candy accent colors unchanged; backgrounds
+   and text flip to deep-navy/purple tones.
+   ============================================ */
+
+[data-theme="dark"] {
+  --color-bg-page:   #16131F;
+  --color-bg-card:   #1E1A2E;
+  --color-bg-input:  #231F33;
+
+  --color-text-primary:   #EEEAF8;
+  --color-text-secondary: #A09ABC;
+  --color-text-tertiary:  #6A6485;
+
+  --color-border:       #2E2A42;
+  --color-border-light: #262040;
+
+  --color-success: #7DDFC3;
+  --color-error:   #FF6B8A;
+  --color-info:    #89CFF3;
+
+  --gradient-candy-bg: linear-gradient(160deg, #16131F 0%, #1A1530 50%, #131820 100%);
+
+  --shadow-sm: 0 2px 8px  rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
+}

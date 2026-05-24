@@ -16,6 +16,7 @@ import { initScene, getSceneData, destroyScene } from './scene.js';
 import { initStyleToggle, getStyle } from './style-toggle.js';
 import { initSettings } from './settings.js';
 import { initHistory, addRecord, onSelectRecord } from './history.js';
+import { initTheme } from './theme.js';
 
 /* ============ State ============ */
 
@@ -66,6 +67,7 @@ function cacheDom() {
 
 function init() {
   cacheDom();
+  initTheme();
   initSettings();
   initHistory();
 

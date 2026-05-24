@@ -236,18 +236,33 @@ export function buildOptimizeMessages(userPrompt, params) {
     focusDesc = focusElems.map(e => `${e.name}: ${e.focusPoint}`).join(', ');
   }
 
-  // Scene — use English keys
+  // Scene — use English keys, per-light details
   let sceneDesc = 'default';
   if (scene) {
     const parts = [];
     if (scene.cameraPreset) parts.push(`camera: ${scene.cameraPreset}`);
-    if (scene.focalLength) parts.push(`focal: ${scene.focalLength}`);
-    if (scene.framing) parts.push(`framing: ${scene.framing}`);
-    if (scene.aperture) parts.push(`aperture: ${scene.aperture}`);
-    if (scene.lightingPreset) parts.push(`lighting: ${scene.lightingPreset}`);
+    if (scene.focalLength)  parts.push(`focal: ${scene.focalLength}`);
+    if (scene.framing)      parts.push(`framing: ${scene.framing}`);
+    if (scene.aperture)     parts.push(`aperture: ${scene.aperture}`);
+
+    // Per-light breakdown (v4)
+    if (scene.lights && typeof scene.lights === 'object') {
+      for (const [enKey, ld] of Object.entries(scene.lights)) {
+        if (!ld.on) {
+          parts.push(`${enKey}: [disabled]`);
+        } else {
+          const sLm = ld.subjectLumens ? `, ~${ld.subjectLumens} lux on subject` : '';
+          parts.push(`${enKey}: ${ld.watts}W ${ld.typeEn}${sLm}`);
+        }
+      }
+    } else if (scene.lightingPreset) {
+      // Legacy fallback
+      parts.push(`lighting: ${scene.lightingPreset}`);
+    }
+
     if (scene.lightQuality) parts.push(`light quality: ${scene.lightQuality}`);
-    if (scene.colorTemp) parts.push(`color temp: ${scene.colorTemp}`);
-    if (scene.timeOfDay) parts.push(`time: ${scene.timeOfDay}`);
+    if (scene.colorTemp)    parts.push(`color temp: ${scene.colorTemp}`);
+    if (scene.timeOfDay)    parts.push(`time: ${scene.timeOfDay}`);
     sceneDesc = parts.length > 0 ? parts.join('\n') : 'default';
   }
 
