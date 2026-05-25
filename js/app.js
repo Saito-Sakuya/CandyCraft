@@ -6,13 +6,35 @@
 
 import { showToast, copyToClipboard } from './utils.js';
 import { streamChat, getApiConfig } from './api.js';
-import { buildAnalysisMessages, buildOptimizeMessages, parseAnalysisResponse } from './prompt.js';
+import {
+  buildAnalysisMessages,
+  buildOptimizeMessages,
+  buildLightingMessages,
+  parseAnalysisResponse,
+  parseLightingRecommendationResponse,
+} from './prompt.js';
 import { initRadar, updateRadarValues, destroyRadar } from './radar.js';
 import { renderSliders, getSliderValues, resetSliders, setValues, registerManualChangeCallback, destroySliders } from './sliders.js';
 import { renderPresets, clearActivePreset, destroyPresets } from './presets.js';
-import { initComposition, getAspectRatio, getCompositionData } from './composition.js';
+import {
+  initComposition,
+  getAspectRatio,
+  getCompositionData,
+  getCompositionRecommendationState,
+  hasManualCompositionChanges,
+  applyCompositionRecommendation,
+} from './composition.js';
 import { initCanvas, updateCanvasAspect, getCanvasData, addElement, destroyCanvas } from './canvas.js';
-import { initScene, getSceneData, destroyScene, getSceneRecommendationState, hasManualSceneChanges, applySceneRecommendation } from './scene.js';
+import {
+  initScene,
+  getSceneData,
+  destroyScene,
+  getSceneRecommendationState,
+  getLightTuningState,
+  hasManualSceneChanges,
+  applySceneRecommendation,
+  applyLightingRecommendation,
+} from './scene.js';
 import { initStyleToggle, getStyle } from './style-toggle.js';
 import { initSettings } from './settings.js';
 import { initHistory, addRecord, onSelectRecord } from './history.js';
@@ -23,6 +45,16 @@ import {
   hasSceneRecommendationDiff,
   formatSceneRecommendationDiffText,
 } from './scene-recommendation.js';
+import {
+  inferCompositionRecommendationFromPrompt,
+  mergeCompositionRecommendations,
+  hasCompositionRecommendationDiff,
+  formatCompositionRecommendationDiffText,
+} from './composition-recommendation.js';
+import {
+  hasLightingRecommendationDiff,
+  formatLightingRecommendationDiffText,
+} from './lighting-recommendation.js';
 
 /* ============ State ============ */
 
@@ -235,6 +267,14 @@ async function handleAnalyze() {
     }
     state.presets = result.presets || [];
 
+    const currentCompositionState = getCompositionRecommendationState();
+    const ruleCompositionRecommendation = inferCompositionRecommendationFromPrompt(prompt);
+    const finalCompositionRecommendation = mergeCompositionRecommendations({
+      current: currentCompositionState,
+      rule: ruleCompositionRecommendation,
+      ai: result.compositionRecommendation || null,
+    });
+
     const currentSceneState = getSceneRecommendationState();
     const ruleSceneRecommendation = inferSceneRecommendationFromPrompt(prompt);
     const finalSceneRecommendation = mergeSceneRecommendations({
@@ -242,6 +282,29 @@ async function handleAnalyze() {
       rule: ruleSceneRecommendation,
       ai: result.sceneRecommendation || null,
     });
+
+    let lightingRecommendation = null;
+    try {
+      showLoading('正在分析提示词（2/2：灯光细化）...');
+      const lightingMessages = buildLightingMessages(prompt, {
+        sceneRecommendation: finalSceneRecommendation,
+        compositionRecommendation: finalCompositionRecommendation,
+      });
+      let lightingText = '';
+      await streamChat(lightingMessages, {
+        onChunk: (chunk) => { lightingText += chunk; },
+        onDone: (text) => { lightingText = text; },
+        onError: (err) => { throw err; },
+        signal: state.abortController.signal,
+      });
+      lightingRecommendation = parseLightingRecommendationResponse(lightingText);
+      if (!lightingRecommendation) {
+        showToast('灯光细化建议未返回有效结构，已保留第一轮布光设置', 'info');
+      }
+    } catch (round2Error) {
+      showToast(`灯光细化阶段失败，已保留第一轮设置：${round2Error.message}`, 'info');
+      lightingRecommendation = null;
+    }
 
     // Render presets
     if (state.presets.length > 0) {
@@ -257,6 +320,10 @@ async function handleAnalyze() {
 
     // Render element canvas with layer panel
     initCanvas('canvas-board', 'layer-panel', state.elements);
+
+    if (hasCompositionRecommendationDiff(currentCompositionState, finalCompositionRecommendation)) {
+      await applyCompositionRecommendationWithPolicy(currentCompositionState, finalCompositionRecommendation);
+    }
     updateCanvasAspect(getAspectRatio());
     showEl(els.canvasSection);
 
@@ -268,6 +335,11 @@ async function handleAnalyze() {
 
     if (hasSceneRecommendationDiff(currentSceneState, finalSceneRecommendation)) {
       await applySceneRecommendationWithPolicy(currentSceneState, finalSceneRecommendation);
+    }
+
+    const currentLightState = getLightTuningState();
+    if (lightingRecommendation && hasLightingRecommendationDiff(currentLightState, lightingRecommendation)) {
+      await applyLightingRecommendationWithPolicy(currentLightState, lightingRecommendation);
     }
     showToast('分析完成，调节参数后点击优化', 'success');
 
@@ -423,13 +495,41 @@ function handleHistorySelect(record) {
   }
 }
 
-/* ============ Scene Recommendation Policy ============ */
+/* ============ Recommendation Policy ============ */
+
+async function applyCompositionRecommendationWithPolicy(currentCompositionState, nextRecommendation) {
+  const diffText = formatCompositionRecommendationDiffText(currentCompositionState, nextRecommendation);
+
+  if (hasManualCompositionChanges()) {
+    const shouldApply = await openRecommendationConfirm({
+      title: '检测到新的构图建议',
+      description: '你已手动调整过构图方向或比例，再次分析将产生冲突。',
+      diffText,
+      reasonText: nextRecommendation?.reason || '',
+    });
+    if (shouldApply) {
+      applyCompositionRecommendation(nextRecommendation, { source: 'user-confirmed' });
+      showToast('已应用新的构图建议', 'success');
+    } else {
+      showToast('已保留你当前的构图设置', 'info');
+    }
+    return;
+  }
+
+  applyCompositionRecommendation(nextRecommendation, { source: 'auto' });
+  showToast(`已自动调整构图：${diffText}`, 'info');
+}
 
 async function applySceneRecommendationWithPolicy(currentSceneState, nextRecommendation) {
   const diffText = formatSceneRecommendationDiffText(currentSceneState, nextRecommendation);
 
   if (hasManualSceneChanges()) {
-    const shouldApply = await openSceneRecommendationConfirm(diffText, nextRecommendation?.reason || '');
+    const shouldApply = await openRecommendationConfirm({
+      title: '检测到新的场景建议',
+      description: '你已手动调整过相机或布光，再次分析将产生冲突。',
+      diffText,
+      reasonText: nextRecommendation?.reason || '',
+    });
     if (shouldApply) {
       applySceneRecommendation(nextRecommendation, { source: 'user-confirmed' });
       showToast('已应用新的相机与布光建议', 'success');
@@ -443,20 +543,47 @@ async function applySceneRecommendationWithPolicy(currentSceneState, nextRecomme
   showToast(`已自动调整场景：${diffText}`, 'info');
 }
 
-function openSceneRecommendationConfirm(diffText, reasonText) {
+async function applyLightingRecommendationWithPolicy(currentLightState, nextRecommendation) {
+  const diffText = formatLightingRecommendationDiffText(currentLightState, nextRecommendation);
+
+  if (hasManualSceneChanges()) {
+    const shouldApply = await openRecommendationConfirm({
+      title: '检测到新的逐灯建议',
+      description: '你已手动调整过灯光参数，再次分析将产生冲突。',
+      diffText,
+      reasonText: nextRecommendation?.reason || '',
+    });
+    if (shouldApply) {
+      applyLightingRecommendation(nextRecommendation, { source: 'user-confirmed' });
+      showToast('已应用新的逐灯建议', 'success');
+    } else {
+      showToast('已保留你当前的逐灯设置', 'info');
+    }
+    return;
+  }
+
+  applyLightingRecommendation(nextRecommendation, { source: 'auto' });
+  showToast(`已自动调整逐灯参数：${diffText}`, 'info');
+}
+
+function openRecommendationConfirm({ title, description, diffText, reasonText }) {
   return new Promise((resolve) => {
     const overlay = els.sceneConfirmOverlay;
+    const titleEl = $('scene-confirm-title');
+    const descEl = overlay?.querySelector('.scene-confirm-desc');
     const summary = els.sceneConfirmSummary;
     const reason = els.sceneConfirmReason;
     const btnApply = els.btnSceneConfirmApply;
     const btnKeep = els.btnSceneConfirmKeep;
 
-    if (!overlay || !summary || !reason || !btnApply || !btnKeep) {
+    if (!overlay || !summary || !reason || !btnApply || !btnKeep || !titleEl || !descEl) {
       resolve(false);
       return;
     }
 
-    summary.textContent = diffText || '检测到新的场景建议。';
+    titleEl.textContent = title || '检测到新的建议';
+    descEl.textContent = description || '当前设置与新建议存在冲突。';
+    summary.textContent = diffText || '检测到新的建议。';
     reason.textContent = reasonText ? `建议依据：${reasonText}` : '建议依据：提示词语义与场景规则。';
 
     const cleanup = () => {

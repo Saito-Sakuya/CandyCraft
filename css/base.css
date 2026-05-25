@@ -241,6 +241,15 @@ ul, ol {
   color: var(--color-text-tertiary);
 }
 
+[data-theme="dark"] .scene-fold {
+  background: rgba(22, 19, 31, 0.72);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .scene-fold-summary {
+  color: var(--color-text-secondary);
+}
+
 /* ---- Light card overrides ---- */
 [data-theme="dark"] .light-card-header {
   background: rgba(255, 255, 255, 0.04);

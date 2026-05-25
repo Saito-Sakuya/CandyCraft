@@ -1,15 +1,15 @@
 /**
- * scene.js — Scene Three-View Panel v4
- * Full lighting system: on/off, type, watts, lumens, subject lumens (falloff)
- * Camera presets, aperture, focal, framing, color temp, time-of-day
+ * scene.js — Scene Three-View Panel v5
+ * Unified 3D scene state + three-view synchronized editing + light coverage visualization.
  */
 
 /* ============ State ============ */
 let containerEl = null;
 let views = {};
+let indicatorRegistry = {};
+let coverageRegistry = {};
 
-let camera = { x: 50, y: 80 };
-let cameraHeight = 50;
+let camera = { x: 50, y: 80, z: 50 };
 let aperture = 'f/2.8';
 let lightingPreset = '自然光';
 let focalLength = '50mm';
@@ -18,20 +18,51 @@ let lightQuality = '中性';
 let colorTemp = '自然';
 let timeOfDay = null;
 let manualSceneChanged = false;
+let sceneFoldState = {
+  views: true,
+  legend: false,
+  lights: false,
+  controls: false,
+};
+
+const LIGHT_KEYS = ['key', 'fill', 'back', 'hair'];
 
 /* ---- Light state: 4 lights ---- */
 let lights = {
-  key: { x: 30, y: 25, on: true, type: '聚光灯', watts: 500, lumens: 5000 },
-  fill: { x: 70, y: 40, on: true, type: '柔光箱', watts: 300, lumens: 3000 },
-  back: { x: 50, y: 15, on: true, type: '环形灯', watts: 200, lumens: 2000 },
-  hair: { x: 50, y: 10, on: false, type: '发灯', watts: 100, lumens: 1000 },
+  key: { x: 30, y: 25, z: 72, on: true, type: '聚光灯', watts: 500, lumens: 5000 },
+  fill: { x: 70, y: 40, z: 58, on: true, type: '柔光箱', watts: 300, lumens: 3000 },
+  back: { x: 50, y: 15, z: 66, on: true, type: '环形灯', watts: 200, lumens: 2000 },
+  hair: { x: 50, y: 10, z: 78, on: false, type: '发灯', watts: 100, lumens: 1000 },
 };
 
 const LIGHT_META = {
-  key: { label: '主光', en: 'key light', color: 'var(--color-candy-lemon)' },
-  fill: { label: '补光', en: 'fill light', color: 'var(--color-candy-sky)' },
-  back: { label: '轮廓光', en: 'back light', color: 'var(--color-candy-mint)' },
-  hair: { label: '发灯', en: 'hair light', color: 'var(--color-candy-lavender)' },
+  key: { order: 1, label: '光源1', en: 'light source 1', color: 'var(--color-candy-lemon)' },
+  fill: { order: 2, label: '光源2', en: 'light source 2', color: 'var(--color-candy-sky)' },
+  back: { order: 3, label: '光源3', en: 'light source 3', color: 'var(--color-candy-peach)' },
+  hair: { order: 4, label: '光源4', en: 'light source 4', color: 'var(--color-candy-lavender)' },
+};
+
+const LIGHT_KEY_ALIASES = {
+  key: 'key',
+  fill: 'fill',
+  back: 'back',
+  hair: 'hair',
+  light1: 'key',
+  light2: 'fill',
+  light3: 'back',
+  light4: 'hair',
+  source1: 'key',
+  source2: 'fill',
+  source3: 'back',
+  source4: 'hair',
+  光源1: 'key',
+  光源2: 'fill',
+  光源3: 'back',
+  光源4: 'hair',
+  主光: 'key',
+  补光: 'fill',
+  轮廓光: 'back',
+  发灯: 'hair',
 };
 
 let activeCameraPreset = null;
@@ -40,6 +71,27 @@ const VIEW_AXIS_HINTS = {
   top: { x: '左右', y: '远近' },
   front: { x: '左右', y: '高低' },
   side: { x: '前后', y: '高低' },
+};
+
+const LIGHT_BEAM_ANGLE = {
+  聚光灯: 34,
+  柔光箱: 82,
+  环形灯: 68,
+  菲涅尔灯: 26,
+  发灯: 30,
+  反光板: 94,
+  霓虹灯: 120,
+  蜡烛: 138,
+};
+
+const FOCAL_CAMERA_ANGLE = {
+  '14mm': 92,
+  '24mm': 82,
+  '35mm': 74,
+  '50mm': 62,
+  '85mm': 44,
+  '135mm': 34,
+  '200mm': 28,
 };
 
 /* ---- Constants ---- */
@@ -55,11 +107,11 @@ const LIGHT_TYPES = [
 ];
 
 const CAMERA_PRESETS = [
-  { name: '平视', desc: 'eye-level shot', cam: { x: 50, y: 85 }, height: 50 },
-  { name: '俯拍', desc: 'high-angle shot', cam: { x: 50, y: 60 }, height: 25 },
-  { name: '仰拍', desc: 'low-angle shot', cam: { x: 50, y: 85 }, height: 80 },
-  { name: '鸟瞰', desc: "bird's eye view", cam: { x: 50, y: 50 }, height: 10 },
-  { name: '45°斜角', desc: '45-degree angle shot', cam: { x: 30, y: 70 }, height: 35 },
+  { name: '平视', desc: 'eye-level shot', cam: { x: 50, y: 85, z: 50 } },
+  { name: '俯拍', desc: 'high-angle shot', cam: { x: 50, y: 60, z: 25 } },
+  { name: '仰拍', desc: 'low-angle shot', cam: { x: 50, y: 85, z: 80 } },
+  { name: '鸟瞰', desc: "bird's eye view", cam: { x: 50, y: 50, z: 10 } },
+  { name: '45°斜角', desc: '45-degree angle shot', cam: { x: 30, y: 70, z: 35 } },
 ];
 
 const APERTURE_OPTIONS = [
@@ -71,11 +123,11 @@ const APERTURE_OPTIONS = [
 ];
 
 const LIGHTING_PRESETS = [
-  { name: '自然光', desc: 'natural ambient lighting', key: { x: 50, y: 10 }, fill: { x: 50, y: 50 }, back: { x: 50, y: 90 } },
-  { name: '伦勃朗', desc: 'Rembrandt (45° key + opposite fill)', key: { x: 25, y: 20 }, fill: { x: 75, y: 45 }, back: { x: 60, y: 85 } },
-  { name: '蝶形光', desc: 'butterfly lighting (front overhead)', key: { x: 50, y: 15 }, fill: { x: 35, y: 50 }, back: { x: 65, y: 50 } },
-  { name: '侧光', desc: 'side lighting (dramatic split)', key: { x: 10, y: 35 }, fill: { x: 80, y: 55 }, back: { x: 50, y: 85 } },
-  { name: '逆光', desc: 'backlit / rim lighting', key: { x: 50, y: 10 }, fill: { x: 40, y: 75 }, back: { x: 60, y: 75 } },
+  { name: '自然光', desc: 'natural ambient lighting', key: { x: 50, y: 10, z: 64 }, fill: { x: 50, y: 50, z: 58 }, back: { x: 50, y: 90, z: 70 }, hair: { x: 50, y: 84, z: 80 } },
+  { name: '伦勃朗', desc: 'Rembrandt (45° key + opposite fill)', key: { x: 25, y: 20, z: 72 }, fill: { x: 75, y: 45, z: 54 }, back: { x: 60, y: 85, z: 70 }, hair: { x: 56, y: 82, z: 82 } },
+  { name: '蝶形光', desc: 'butterfly lighting (front overhead)', key: { x: 50, y: 15, z: 82 }, fill: { x: 35, y: 50, z: 56 }, back: { x: 65, y: 50, z: 60 }, hair: { x: 52, y: 42, z: 84 } },
+  { name: '侧光', desc: 'side lighting (dramatic split)', key: { x: 10, y: 35, z: 68 }, fill: { x: 80, y: 55, z: 54 }, back: { x: 50, y: 85, z: 66 }, hair: { x: 62, y: 80, z: 80 } },
+  { name: '逆光', desc: 'backlit / rim lighting', key: { x: 50, y: 10, z: 62 }, fill: { x: 40, y: 75, z: 56 }, back: { x: 60, y: 75, z: 78 }, hair: { x: 58, y: 70, z: 86 } },
 ];
 
 const FOCAL_OPTIONS = [
@@ -146,6 +198,20 @@ export function getSceneRecommendationState() {
   };
 }
 
+export function getLightTuningState() {
+  const result = { lights: {} };
+  for (const key of LIGHT_KEYS) {
+    const light = lights[key];
+    if (!light) continue;
+    result.lights[key] = {
+      on: Boolean(light.on),
+      type: light.type,
+      lumens: Math.round(light.lumens),
+    };
+  }
+  return result;
+}
+
 export function hasManualSceneChanges() {
   return manualSceneChanged;
 }
@@ -190,6 +256,40 @@ export function applySceneRecommendation(reco, { source = 'auto' } = {}) {
   return source === 'auto' || source === 'user-confirmed' ? true : true;
 }
 
+export function applyLightingRecommendation(reco, { source = 'auto' } = {}) {
+  if (!reco || typeof reco !== 'object' || !reco.lights || typeof reco.lights !== 'object') return false;
+
+  let applied = false;
+  for (const [rawKey, patch] of Object.entries(reco.lights)) {
+    const key = resolveLightKey(rawKey);
+    const current = key ? lights[key] : null;
+    if (!patch || !current) continue;
+
+    if (typeof patch.on === 'boolean') {
+      current.on = patch.on;
+      applied = true;
+    }
+    if (typeof patch.type === 'string' && LIGHT_TYPES.some((item) => item.value === patch.type)) {
+      current.type = patch.type;
+      applied = true;
+    }
+    if (Number.isFinite(patch.lumens)) {
+      const lumens = clamp(Math.round(Number(patch.lumens)), 100, 100000);
+      current.lumens = lumens;
+      current.watts = clamp(Math.round(lumens / 100), 25, 2000);
+      applied = true;
+    }
+  }
+
+  if (!applied) return false;
+
+  if (containerEl) render();
+  if (source === 'auto' || source === 'user-confirmed') {
+    clearManualSceneChanges();
+  }
+  return true;
+}
+
 /* ============ Data Out ============ */
 
 export function getSceneData() {
@@ -206,17 +306,25 @@ export function getSceneData() {
     const typeInfo = LIGHT_TYPES.find((t) => t.value === l.type);
     const sLm = l.on ? calcSubjectLumens(l) : 0;
     lightDescs[meta.en] = {
+      alias: key,
+      label: meta.label,
       on: l.on,
       type: l.type,
       typeEn: typeInfo?.en || l.type,
       watts: l.watts,
       lumens: l.lumens,
       subjectLumens: Math.round(sLm),
+      position: { x: Math.round(l.x), y: Math.round(l.y), z: Math.round(l.z) },
     };
   }
 
   return {
-    camera: { x: Math.round(camera.x), y: Math.round(camera.y), height: Math.round(cameraHeight) },
+    camera: {
+      x: Math.round(camera.x),
+      y: Math.round(camera.y),
+      height: Math.round(camera.z),
+      z: Math.round(camera.z),
+    },
     cameraPreset: camPreset ? `${camPreset.name} (${camPreset.desc})` : '自定义',
     aperture,
     focalLength: focalOpt ? `${focalOpt.value} - ${focalOpt.desc}` : focalLength,
@@ -238,6 +346,9 @@ export function destroyScene() {
 function render() {
   if (!containerEl) return;
   containerEl.innerHTML = '';
+  views = {};
+  indicatorRegistry = {};
+  coverageRegistry = {};
 
   const viewsRow = el('div', 'scene-views');
   const topView = createView('俯视', 'top');
@@ -246,16 +357,15 @@ function render() {
   viewsRow.appendChild(topView);
   viewsRow.appendChild(frontView);
   viewsRow.appendChild(sideView);
-  containerEl.appendChild(viewsRow);
 
   const legend = el('div', 'scene-legend');
   legend.innerHTML = `
     <div class="scene-legend-items">
       <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-cam"></span>相机</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-key"></span>主光</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-fill"></span>补光</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-back"></span>轮廓光</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-hair"></span>发灯</span>
+      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-key"></span>光源1</span>
+      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-fill"></span>光源2</span>
+      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-back"></span>光源3</span>
+      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-hair"></span>光源4</span>
     </div>
     <div class="scene-legend-axes">
       <span>俯视: ←左右→ ↑远↓近</span>
@@ -264,18 +374,14 @@ function render() {
     </div>
     <div id="scene-coord-readout" class="scene-coord-readout"></div>
   `;
-  containerEl.appendChild(legend);
 
   views = { top: topView, front: frontView, side: sideView };
-
-  placeCamera();
-  placeLights();
-  placeCameraDirectionLine();
+  placeEntities();
   updateSceneCoordReadout();
 
   const controls = el('div', 'scene-controls');
-
   controls.appendChild(createControlRow('机位', createCameraPresets()));
+
   const camDescEl = el('div', 'scene-preset-desc');
   camDescEl.id = 'cam-desc';
   const camPreset = CAMERA_PRESETS.find((p) => p.name === activeCameraPreset);
@@ -284,6 +390,7 @@ function render() {
 
   controls.appendChild(createControlRow('焦距', createOptionRow(FOCAL_OPTIONS, focalLength, (v) => {
     focalLength = v;
+    syncAllCoverage();
     markManualSceneChange();
   }, 'focal-option')));
   controls.appendChild(createControlRow('景别', createOptionRow(FRAMING_OPTIONS, framing, (v) => {
@@ -300,21 +407,26 @@ function render() {
   controls.appendChild(lightDescEl);
 
   const lightSection = el('div', 'light-cards');
-  for (const key of ['key', 'fill', 'back', 'hair']) {
+  for (const key of LIGHT_KEYS) {
     lightSection.appendChild(createLightCard(key));
   }
-  controls.appendChild(lightSection);
 
   controls.appendChild(createControlRow('柔硬', createOptionRow(LIGHT_QUALITY_OPTIONS, lightQuality, (v) => {
     lightQuality = v;
     timeOfDay = null;
     updateTimeBtns();
+    syncAllCoverage();
     markManualSceneChange();
   }, 'quality-option')));
   controls.appendChild(createControlRow('色温', createColorTempSelector()));
   controls.appendChild(createControlRow('时段', createTimePresets()));
 
-  containerEl.appendChild(controls);
+  const groups = el('div', 'scene-mobile-groups');
+  groups.appendChild(createSceneFold('views', '三视图', viewsRow, true));
+  groups.appendChild(createSceneFold('legend', '图例与坐标读数', legend, false));
+  groups.appendChild(createSceneFold('lights', '灯光卡片', lightSection, false));
+  groups.appendChild(createSceneFold('controls', '预设与全局参数', controls, false));
+  containerEl.appendChild(groups);
 }
 
 /* ============ Light Cards ============ */
@@ -336,7 +448,7 @@ function createLightCard(key) {
     lights[key].on = toggleInput.checked;
     card.classList.toggle('light-card-off', !lights[key].on);
     updateSubjectLumens(key, card);
-    updateLightIndicator(key);
+    syncEntityViews('light', key);
     updateSceneCoordReadout();
     markManualSceneChange();
   });
@@ -352,7 +464,7 @@ function createLightCard(key) {
 
   const subjEl = el('span', 'light-subject-lm');
   subjEl.id = `subj-lm-${key}`;
-  subjEl.title = '估算打到被摄主体的流明值（平方反比衰减）';
+  subjEl.title = '估算打到被摄主体的照度（平方反比衰减近似）';
   const sLm = l.on ? Math.round(calcSubjectLumens(l)) : 0;
   subjEl.textContent = l.on ? `→ ${formatLm(sLm)} lux` : '关闭';
   header.appendChild(subjEl);
@@ -377,6 +489,7 @@ function createLightCard(key) {
   });
   typeSelect.addEventListener('change', () => {
     lights[key].type = typeSelect.value;
+    syncEntityCoverage('light', key);
     markManualSceneChange();
   });
   typeRow.appendChild(typeSelect);
@@ -399,6 +512,9 @@ function createLightCard(key) {
   const wattsVal = el('span', 'light-slider-val');
   wattsVal.textContent = `${l.watts}W`;
 
+  const lumensVal = el('span', 'light-slider-val');
+  lumensVal.textContent = `${formatLm(l.lumens)} lm`;
+
   wattsSlider.addEventListener('input', () => {
     const w = Number(wattsSlider.value);
     lights[key].watts = w;
@@ -406,6 +522,7 @@ function createLightCard(key) {
     wattsVal.textContent = `${w}W`;
     lumensVal.textContent = `${formatLm(lights[key].lumens)} lm`;
     updateSubjectLumens(key, card);
+    syncEntityCoverage('light', key);
     markManualSceneChange();
   });
 
@@ -420,7 +537,6 @@ function createLightCard(key) {
   lmRow.appendChild(lmLabel);
 
   const lmWrap = el('div', 'light-slider-wrap');
-
   const lumensInput = document.createElement('input');
   lumensInput.type = 'number';
   lumensInput.className = 'light-lm-input';
@@ -430,15 +546,14 @@ function createLightCard(key) {
   lumensInput.value = l.lumens;
   lumensInput.title = '手动输入流明值';
 
-  const lumensVal = el('span', 'light-slider-val');
-  lumensVal.textContent = `${formatLm(l.lumens)} lm`;
-
   lumensInput.addEventListener('change', () => {
     const v = clamp(Number(lumensInput.value), 100, 100000);
     lights[key].lumens = v;
+    lights[key].watts = clamp(Math.round(v / 100), 25, 2000);
     lumensInput.value = v;
     lumensVal.textContent = `${formatLm(v)} lm`;
     updateSubjectLumens(key, card);
+    syncEntityCoverage('light', key);
     markManualSceneChange();
   });
 
@@ -451,41 +566,7 @@ function createLightCard(key) {
   return card;
 }
 
-/* ---- Helpers ---- */
-
-function calcSubjectLumens(light) {
-  const dx = (light.x - 50) / 100;
-  const dy = (light.y - 50) / 100;
-  const distSq = dx * dx + dy * dy;
-  const factor = 1 / (1 + 10 * distSq);
-  return light.lumens * factor;
-}
-
-function updateSubjectLumens(key, card) {
-  const l = lights[key];
-  const lumEl = card.querySelector(`#subj-lm-${key}`);
-  if (!lumEl) return;
-  if (l.on) {
-    const sLm = Math.round(calcSubjectLumens(l));
-    lumEl.textContent = `→ ${formatLm(sLm)} lux`;
-  } else {
-    lumEl.textContent = '关闭';
-  }
-}
-
-function formatLm(v) {
-  return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v);
-}
-
-function updateLightIndicator(key) {
-  const l = lights[key];
-  const indicator = views.top?.querySelector(`[data-id="light-${key}"]`);
-  if (indicator) {
-    indicator.style.opacity = l.on ? '1' : '0.25';
-  }
-}
-
-/* ============ Views ============ */
+/* ============ Views & Indicators ============ */
 
 function createView(label, viewId) {
   const axisHint = VIEW_AXIS_HINTS[viewId] || VIEW_AXIS_HINTS.top;
@@ -502,25 +583,244 @@ function createView(label, viewId) {
   return view;
 }
 
-/* ============ Camera ============ */
-
-function placeCamera() {
-  addDraggableIndicator(views.top, 'camera', camera.x, camera.y, 'cam-top', (x, y) => {
-    camera.x = x;
-    camera.y = y;
-    activeCameraPreset = null;
-    updateCameraPresetUI();
-    markManualSceneChange();
-  });
-
-  addDraggableIndicator(views.side, 'camera', camera.y, 100 - cameraHeight, 'cam-side', (x, y) => {
-    camera.y = x;
-    cameraHeight = 100 - y;
-    activeCameraPreset = null;
-    updateCameraPresetUI();
-    markManualSceneChange();
-  });
+function placeEntities() {
+  for (const viewId of ['top', 'front', 'side']) {
+    addEntityToView('camera', null, viewId);
+    for (const key of LIGHT_KEYS) {
+      addEntityToView('light', key, viewId);
+    }
+  }
 }
+
+function addEntityToView(kind, key, viewId) {
+  const viewEl = views[viewId];
+  if (!viewEl) return;
+
+  const coverageEl = el('div', 'scene-coverage');
+  coverageEl.dataset.entity = entityId(kind, key);
+  coverageEl.dataset.type = kind === 'camera' ? 'camera' : key;
+  viewEl.appendChild(coverageEl);
+
+  const indicator = el('div', kind === 'camera' ? 'scene-camera' : 'scene-light');
+  indicator.dataset.id = entityId(kind, key);
+  if (kind === 'light') {
+    indicator.setAttribute('data-type', key);
+    indicator.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
+  } else {
+    indicator.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>';
+  }
+
+  indicator.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    indicator.setPointerCapture(e.pointerId);
+    indicator.classList.add('dragging');
+
+    const viewRect = viewEl.getBoundingClientRect();
+    const move = (ev) => {
+      const sx = clamp(((ev.clientX - viewRect.left) / viewRect.width) * 100, 5, 95);
+      const sy = clamp(((ev.clientY - viewRect.top) / viewRect.height) * 100, 5, 95);
+
+      setEntityStateByView(kind, key, viewId, sx, sy);
+      if (kind === 'camera') {
+        activeCameraPreset = null;
+        updateCameraPresetUI();
+      } else {
+        lightingPreset = '自定义';
+        updateLightingPresetUI();
+        updateLightDesc('');
+      }
+
+      syncEntityViews(kind, key);
+      if (kind === 'light') {
+        const card = containerEl?.querySelector(`.light-card-${key}`);
+        if (card) updateSubjectLumens(key, card);
+      }
+      updateSceneCoordReadout();
+      setDragCoordTooltip(indicator, sx, sy);
+      markManualSceneChange();
+    };
+
+    const up = () => {
+      indicator.classList.remove('dragging');
+      clearDragCoordTooltip(indicator);
+      indicator.removeEventListener('pointermove', move);
+      indicator.removeEventListener('pointerup', up);
+    };
+
+    indicator.addEventListener('pointermove', move);
+    indicator.addEventListener('pointerup', up);
+  });
+
+  viewEl.appendChild(indicator);
+  registerEntityDom(kind, key, viewId, indicator, coverageEl);
+  syncEntityViews(kind, key);
+}
+
+function registerEntityDom(kind, key, viewId, indicator, coverageEl) {
+  const id = entityId(kind, key);
+  if (!indicatorRegistry[id]) indicatorRegistry[id] = {};
+  if (!coverageRegistry[id]) coverageRegistry[id] = {};
+  indicatorRegistry[id][viewId] = indicator;
+  coverageRegistry[id][viewId] = coverageEl;
+}
+
+function syncEntityViews(kind, key) {
+  const id = entityId(kind, key);
+  const indicatorSet = indicatorRegistry[id] || {};
+  const coverageSet = coverageRegistry[id] || {};
+
+  for (const viewId of ['top', 'front', 'side']) {
+    const pos = getEntityScreenPosition(kind, key, viewId);
+    const indicator = indicatorSet[viewId];
+    if (indicator) {
+      indicator.style.left = `${pos.x}%`;
+      indicator.style.top = `${pos.y}%`;
+      if (kind === 'light') {
+        indicator.style.opacity = lights[key].on ? '1' : '0.25';
+      }
+    }
+
+    const coverageEl = coverageSet[viewId];
+    if (coverageEl) {
+      const cfg = getCoverageConfig(kind, key, viewId);
+      coverageEl.style.left = `${pos.x}%`;
+      coverageEl.style.top = `${pos.y}%`;
+      coverageEl.style.width = `${cfg.radius * 2}%`;
+      coverageEl.style.height = `${cfg.radius * 2}%`;
+      coverageEl.style.setProperty('--coverage-color', cfg.color);
+      coverageEl.style.setProperty('--coverage-opacity', String(cfg.opacity));
+      coverageEl.style.transform = `translate(-50%, -50%) rotate(${cfg.angleDeg}deg)`;
+      coverageEl.style.filter = cfg.blurPx > 0 ? `blur(${cfg.blurPx}px)` : 'none';
+      coverageEl.style.clipPath = `polygon(0% 50%, 100% ${50 - cfg.halfSpreadPct}%, 100% ${50 + cfg.halfSpreadPct}%)`;
+      coverageEl.style.opacity = cfg.visible ? '1' : '0';
+    }
+  }
+}
+
+function syncEntityCoverage(kind, key) {
+  const id = entityId(kind, key);
+  const coverageSet = coverageRegistry[id] || {};
+  for (const viewId of ['top', 'front', 'side']) {
+    const coverageEl = coverageSet[viewId];
+    if (!coverageEl) continue;
+    const cfg = getCoverageConfig(kind, key, viewId);
+    coverageEl.style.width = `${cfg.radius * 2}%`;
+    coverageEl.style.height = `${cfg.radius * 2}%`;
+    coverageEl.style.setProperty('--coverage-color', cfg.color);
+    coverageEl.style.setProperty('--coverage-opacity', String(cfg.opacity));
+    coverageEl.style.filter = cfg.blurPx > 0 ? `blur(${cfg.blurPx}px)` : 'none';
+    coverageEl.style.clipPath = `polygon(0% 50%, 100% ${50 - cfg.halfSpreadPct}%, 100% ${50 + cfg.halfSpreadPct}%)`;
+    coverageEl.style.opacity = cfg.visible ? '1' : '0';
+  }
+}
+
+function syncAllCoverage() {
+  syncEntityCoverage('camera', null);
+  for (const key of LIGHT_KEYS) syncEntityCoverage('light', key);
+}
+
+function setEntityStateByView(kind, key, viewId, sx, sy) {
+  if (kind === 'camera') {
+    if (viewId === 'top') {
+      camera.x = sx;
+      camera.y = sy;
+    } else if (viewId === 'front') {
+      camera.x = sx;
+      camera.z = 100 - sy;
+    } else if (viewId === 'side') {
+      camera.y = sx;
+      camera.z = 100 - sy;
+    }
+    camera.x = clamp(camera.x, 5, 95);
+    camera.y = clamp(camera.y, 5, 95);
+    camera.z = clamp(camera.z, 5, 95);
+    return;
+  }
+
+  const light = lights[key];
+  if (!light) return;
+  if (viewId === 'top') {
+    light.x = sx;
+    light.y = sy;
+  } else if (viewId === 'front') {
+    light.x = sx;
+    light.z = 100 - sy;
+  } else if (viewId === 'side') {
+    light.y = sx;
+    light.z = 100 - sy;
+  }
+  light.x = clamp(light.x, 5, 95);
+  light.y = clamp(light.y, 5, 95);
+  light.z = clamp(light.z, 5, 95);
+}
+
+function getEntityScreenPosition(kind, key, viewId) {
+  const state = kind === 'camera' ? camera : lights[key];
+  if (!state) return { x: 50, y: 50 };
+
+  if (viewId === 'top') return { x: state.x, y: state.y };
+  if (viewId === 'front') return { x: state.x, y: 100 - state.z };
+  return { x: state.y, y: 100 - state.z };
+}
+
+function getCoverageConfig(kind, key, viewId) {
+  const dir = getDirectionAngleDeg(kind, key, viewId);
+  if (kind === 'camera') {
+    const spread = FOCAL_CAMERA_ANGLE[focalLength] || 62;
+    const radius = clamp(22 + spread * 0.18, 24, 46);
+    return {
+      radius,
+      angleDeg: dir,
+      halfSpreadPct: clamp(spread / 2.4, 12, 48),
+      opacity: 0.16,
+      blurPx: lightQuality === '柔光' ? 2 : 1,
+      color: 'rgba(255, 143, 171, var(--coverage-opacity))',
+      visible: true,
+    };
+  }
+
+  const light = lights[key];
+  const spread = LIGHT_BEAM_ANGLE[light.type] || 60;
+  const radius = clamp(14 + Math.sqrt(light.lumens) / 7.8, 14, 44);
+  const qualitySoft = lightQuality === '柔光';
+  return {
+    radius,
+    angleDeg: dir,
+    halfSpreadPct: clamp(spread / 2.2, 10, 48),
+    opacity: light.on ? 0.19 : 0.07,
+    blurPx: qualitySoft ? 3 : 1,
+    color: `color-mix(in srgb, ${LIGHT_META[key].color} 70%, transparent)`,
+    visible: true,
+  };
+}
+
+function getDirectionAngleDeg(kind, key, viewId) {
+  const target = { x: 50, y: 50, z: 50 };
+  const source = kind === 'camera' ? camera : lights[key];
+  if (!source) return 0;
+
+  let dx = 0;
+  let dy = 0;
+  if (viewId === 'top') {
+    dx = target.x - source.x;
+    dy = target.y - source.y;
+  } else if (viewId === 'front') {
+    dx = target.x - source.x;
+    dy = source.z - target.z;
+  } else {
+    dx = target.y - source.y;
+    dy = source.z - target.z;
+  }
+  if (Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001) return 0;
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+function entityId(kind, key) {
+  return kind === 'camera' ? 'camera' : `light-${key}`;
+}
+
+/* ============ Controls ============ */
 
 function createCameraPresets() {
   const row = el('div', 'camera-presets');
@@ -547,8 +847,6 @@ function updateCameraPresetUI() {
   updateCamDesc('');
 }
 
-/* ============ Aperture ============ */
-
 function createApertureSelector() {
   const row = el('div', 'aperture-selector');
   APERTURE_OPTIONS.forEach((opt) => {
@@ -566,35 +864,6 @@ function createApertureSelector() {
     row.appendChild(btn);
   });
   return row;
-}
-
-/* ============ Lighting Presets ============ */
-
-function placeLights() {
-  for (const [key, light] of Object.entries(lights)) {
-    if (key === 'hair') continue;
-
-    addDraggableIndicator(views.top, 'light', light.x, light.y, `light-${key}`, (x, y) => {
-      lights[key].x = x;
-      lights[key].y = y;
-      lightingPreset = '自定义';
-      updateLightingPresetUI();
-      updateLightDesc('');
-      const card = containerEl?.querySelector(`.light-card-${key}`);
-      if (card) updateSubjectLumens(key, card);
-      markManualSceneChange();
-    }, key, light.on);
-  }
-
-  const hair = lights.hair;
-  addDraggableIndicator(views.top, 'light', hair.x, hair.y, 'light-hair', (x, y) => {
-    lights.hair.x = x;
-    lights.hair.y = y;
-    markManualSceneChange();
-  }, 'hair', hair.on);
-
-  addStaticLight(views.front, 'key', lights.key.x, 25, lights.key.on);
-  addStaticLight(views.side, 'key', lights.key.y, 25, lights.key.on);
 }
 
 function createLightingPresets() {
@@ -620,53 +889,61 @@ function updateLightingPresetUI() {
   });
 }
 
-/* ============ Draggable Indicator ============ */
+/* ============ Helpers ============ */
 
-function addDraggableIndicator(viewEl, type, pctX, pctY, dataId, onMove, lightKey, lightOn = true) {
-  const indicator = el('div', type === 'camera' ? 'scene-camera' : 'scene-light');
-  indicator.dataset.id = dataId;
-  if (type === 'light' && lightKey) {
-    indicator.setAttribute('data-type', lightKey);
-    indicator.style.opacity = lightOn ? '1' : '0.25';
-    indicator.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
-  } else {
-    indicator.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>';
-  }
-
-  indicator.style.left = `${pctX}%`;
-  indicator.style.top = `${pctY}%`;
-
-  indicator.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    indicator.setPointerCapture(e.pointerId);
-    indicator.classList.add('dragging');
-
-    const viewRect = viewEl.getBoundingClientRect();
-    const move = (ev) => {
-      const x = clamp(((ev.clientX - viewRect.left) / viewRect.width) * 100, 5, 95);
-      const y = clamp(((ev.clientY - viewRect.top) / viewRect.height) * 100, 5, 95);
-      indicator.style.left = `${x}%`;
-      indicator.style.top = `${y}%`;
-      onMove(x, y);
-      setDragCoordTooltip(indicator, x, y);
-      updateSceneCoordReadout();
-    };
-    const up = () => {
-      indicator.classList.remove('dragging');
-      clearDragCoordTooltip(indicator);
-      updateSceneCoordReadout();
-      indicator.removeEventListener('pointermove', move);
-      indicator.removeEventListener('pointerup', up);
-    };
-    indicator.addEventListener('pointermove', move);
-    indicator.addEventListener('pointerup', up);
-  });
-
-  viewEl.appendChild(indicator);
+function calcSubjectLumens(light) {
+  const dx = (light.x - 50) / 100;
+  const dy = (light.y - 50) / 100;
+  const dz = (light.z - 50) / 100;
+  const distSq = dx * dx + dy * dy + dz * dz;
+  const factor = 1 / (1 + 10 * distSq);
+  return light.lumens * factor;
 }
 
-/* ============ Helpers ============ */
+function updateSubjectLumens(key, card) {
+  const l = lights[key];
+  const lumEl = card.querySelector(`#subj-lm-${key}`);
+  if (!lumEl) return;
+  if (l.on) {
+    const sLm = Math.round(calcSubjectLumens(l));
+    lumEl.textContent = `→ ${formatLm(sLm)} lux`;
+  } else {
+    lumEl.textContent = '关闭';
+  }
+}
+
+function formatLm(v) {
+  return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v);
+}
+
+function isMobileSceneLayout() {
+  return Boolean(window.matchMedia?.('(max-width: 768px)').matches);
+}
+
+function createSceneFold(key, title, contentEl, mobileDefaultOpen = false) {
+  const wrapper = el('details', `scene-fold scene-fold-${key}`);
+  const summary = el('summary', 'scene-fold-summary');
+  summary.textContent = title;
+  wrapper.appendChild(summary);
+
+  const body = el('div', 'scene-fold-body');
+  body.appendChild(contentEl);
+  wrapper.appendChild(body);
+
+  const mobile = isMobileSceneLayout();
+  if (mobile) {
+    const open = sceneFoldState[key] ?? mobileDefaultOpen;
+    wrapper.open = Boolean(open);
+  } else {
+    wrapper.open = true;
+  }
+
+  wrapper.addEventListener('toggle', () => {
+    sceneFoldState[key] = wrapper.open;
+  });
+
+  return wrapper;
+}
 
 function el(tag, className) {
   const dom = document.createElement(tag);
@@ -687,37 +964,6 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
-function placeCameraDirectionLine() {
-  if (!views.top) return;
-  const line = el('div', 'scene-cam-line-el');
-  const dx = 50 - camera.x;
-  const dy = 50 - camera.y;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  if (len < 2) return;
-  const angle = Math.atan2(dx, -dy) * (180 / Math.PI);
-  line.style.cssText = `
-    position:absolute;left:${camera.x}%;top:${camera.y}%;
-    width:1.5px;height:${len}%;transform-origin:top center;
-    transform:rotate(${angle}deg);
-    background:var(--color-candy-pink);opacity:0.25;
-    pointer-events:none;z-index:3;
-  `;
-  views.top.appendChild(line);
-}
-
-function addStaticLight(viewEl, lightType, pctX, pctY, on = true) {
-  const dot = el('div', 'scene-light scene-light-static');
-  dot.setAttribute('data-type', lightType);
-  dot.style.left = `${pctX}%`;
-  dot.style.top = `${pctY}%`;
-  dot.style.opacity = on ? '0.5' : '0.15';
-  dot.style.cursor = 'default';
-  dot.style.width = '14px';
-  dot.style.height = '14px';
-  dot.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="8" height="8"><circle cx="12" cy="12" r="5"/></svg>';
-  viewEl.appendChild(dot);
-}
-
 function updateCamDesc(desc) {
   const dom = containerEl?.querySelector('#cam-desc');
   if (dom) dom.textContent = desc;
@@ -733,16 +979,18 @@ function updateSceneCoordReadout() {
   if (!dom) return;
 
   const cameraTop = `相机俯视 X${Math.round(camera.x)} Y${Math.round(camera.y)}`;
-  const cameraSide = `相机侧视 X${Math.round(camera.y)} Y${Math.round(100 - cameraHeight)}`;
-  const lightRows = ['key', 'fill', 'back', 'hair'].map((key) => {
+  const cameraFront = `相机正视 X${Math.round(camera.x)} Z${Math.round(camera.z)}`;
+  const cameraSide = `相机侧视 Y${Math.round(camera.y)} Z${Math.round(camera.z)}`;
+  const lightRows = LIGHT_KEYS.map((key) => {
     const light = lights[key];
     const label = LIGHT_META[key].label;
     if (!light.on) return `${label}: 关闭`;
-    return `${label}: X${Math.round(light.x)} Y${Math.round(light.y)}`;
+    return `${label}: X${Math.round(light.x)} Y${Math.round(light.y)} Z${Math.round(light.z)}`;
   });
 
   dom.innerHTML = `
     <span>${cameraTop}</span>
+    <span>${cameraFront}</span>
     <span>${cameraSide}</span>
     ${lightRows.map((row) => `<span>${row}</span>`).join('')}
   `;
@@ -819,6 +1067,7 @@ function createTimePresets() {
       row.querySelectorAll('.time-preset').forEach((node) => {
         node.classList.toggle('active', node.dataset.name === preset.name);
       });
+      syncAllCoverage();
       markManualSceneChange();
     });
     row.appendChild(btn);
@@ -837,7 +1086,6 @@ function applyCameraPresetByName(name) {
   if (!preset) return false;
   activeCameraPreset = preset.name;
   camera = { ...preset.cam };
-  cameraHeight = preset.height;
   return true;
 }
 
@@ -854,12 +1102,27 @@ function applyLightingPresetByName(name) {
   const preset = LIGHTING_PRESETS.find((item) => item.name === name);
   if (!preset) return false;
   lightingPreset = preset.name;
-  lights.key = { ...lights.key, x: preset.key.x, y: preset.key.y };
-  lights.fill = { ...lights.fill, x: preset.fill.x, y: preset.fill.y };
-  lights.back = { ...lights.back, x: preset.back.x, y: preset.back.y };
+  lights.key = { ...lights.key, ...preset.key };
+  lights.fill = { ...lights.fill, ...preset.fill };
+  lights.back = { ...lights.back, ...preset.back };
+  lights.hair = { ...lights.hair, ...preset.hair };
   return true;
+}
+
+function resolveLightKey(rawKey) {
+  const token = normalizeToken(rawKey);
+  return LIGHT_KEY_ALIASES[token] || null;
+}
+
+function normalizeToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[，,、。.!?;；'"`~]/g, '');
 }
 
 function markManualSceneChange() {
   manualSceneChanged = true;
 }
+

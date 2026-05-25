@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-05-24T17:37:15.511Z",
+  "generatedAt": "2026-05-25T07:34:46.216Z",
   "chatEndpoint": "http://127.0.0.1:8788/api/chat",
   "modelEndpointAvailable": false,
-  "modelEndpointError": "HTTP 500: {\"error\":{\"code\":\"server_not_configured\",\"message\":\"服务端未完成配置，请联系管理员设置 UPSTREAM_BASE_URL 与 UPSTREAM_API_KEY\"},\"requestId\":\"bc46b6e2-5bf9-45ad-98d6-4e468ada6df5\"}",
+  "modelEndpointError": "HTTP 500: {\"error\":{\"code\":\"server_not_configured\",\"message\":\"服务端未完成配置，请联系管理员设置 UPSTREAM_BASE_URL 与 UPSTREAM_API_KEY\"},\"requestId\":\"9ee69e30-330d-4912-953c-2133db6f3d2d\"}",
   "totals": {
-    "samples": 18,
-    "pass": 18,
+    "samples": 20,
+    "pass": 20,
     "fail": 0,
     "passRate": 1
   },
@@ -21,6 +21,35 @@
         "lightQuality": "中性",
         "lightingPreset": "侧光",
         "reason": "规则匹配: 夜晚语义"
+      },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
       },
       "issues": [],
       "status": "pass",
@@ -40,6 +69,35 @@
         "lightingPreset": "侧光",
         "reason": "规则匹配: 夜晚语义 / 侧光关键词"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -57,6 +115,35 @@
         "lightQuality": "柔光",
         "lightingPreset": "逆光",
         "reason": "规则匹配: 日出语义 / 逆光关键词"
+      },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
       },
       "issues": [],
       "status": "pass",
@@ -76,6 +163,35 @@
         "lightingPreset": "逆光",
         "reason": "规则匹配: 黄金时段"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -94,6 +210,35 @@
         "lightingPreset": "自然光",
         "reason": "规则匹配: 正午语义"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -109,6 +254,35 @@
         "lightingPreset": "伦勃朗",
         "reason": "规则匹配: 伦勃朗布光"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -121,6 +295,35 @@
       "prompt": "时尚杂志封面女模，蝶形光，干净背景，特写镜头",
       "modelEndpointAvailable": false,
       "inferredReco": null,
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -135,6 +338,35 @@
       "inferredReco": {
         "cameraPreset": "45°斜角",
         "reason": "规则匹配: 斜角视角"
+      },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
       },
       "issues": [],
       "status": "pass",
@@ -155,6 +387,35 @@
         "cameraPreset": "鸟瞰",
         "reason": "规则匹配: 夜晚语义 / 鸟瞰视角"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -170,6 +431,35 @@
         "cameraPreset": "俯拍",
         "reason": "规则匹配: 俯拍视角"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -184,6 +474,35 @@
       "inferredReco": {
         "cameraPreset": "仰拍",
         "reason": "规则匹配: 仰拍视角"
+      },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
       },
       "issues": [],
       "status": "pass",
@@ -203,6 +522,35 @@
         "lightingPreset": "侧光",
         "reason": "规则匹配: 夜晚语义"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -215,6 +563,35 @@
       "prompt": "三人小队在雨中推进，前中后景层次清晰，镜头跟拍感",
       "modelEndpointAvailable": false,
       "inferredReco": null,
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -227,11 +604,41 @@
       "prompt": "双人对视，背景是燃烧的仓库，前景碎片飞溅，电影海报风",
       "modelEndpointAvailable": false,
       "inferredReco": null,
+      "compositionRecommendation": {
+        "orientation": "portrait",
+        "ratio": "9:16",
+        "reason": "规则匹配: 竖向构图关键词 / 方向默认比例"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
       "optimizePreview": "",
-      "optimizeInputPreview": "Original prompt:\n双人对视，背景是燃烧的仓库，前景碎片飞溅，电影海报风\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBac"
+      "optimizeInputPreview": "Original prompt:\n双人对视，背景是燃烧的仓库，前景碎片飞溅，电影海报风\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 9:16 portrait, 2K (--ar 9:16)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
     },
     {
       "id": "S15",
@@ -244,6 +651,35 @@
         "lightQuality": "中性",
         "lightingPreset": "侧光",
         "reason": "规则匹配: 夜晚语义"
+      },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
       },
       "issues": [],
       "status": "pass",
@@ -263,6 +699,35 @@
         "lightingPreset": "逆光",
         "reason": "规则匹配: 日出语义"
       },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -275,6 +740,35 @@
       "prompt": "微距拍摄机械手表，金属反射细节，极致清晰，黑色背景",
       "modelEndpointAvailable": false,
       "inferredReco": null,
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
@@ -287,11 +781,130 @@
       "prompt": "极简主义客厅，白墙与木质家具，柔和自然光，安静氛围",
       "modelEndpointAvailable": false,
       "inferredReco": null,
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "16:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
       "issues": [],
       "status": "pass",
       "optimizeModelError": "",
       "optimizePreview": "",
       "optimizeInputPreview": "Original prompt:\n极简主义客厅，白墙与木质家具，柔和自然光，安静氛围\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 16:9 landscape, 2K (--ar 16:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
+    },
+    {
+      "id": "S19",
+      "group": "orientation",
+      "prompt": "电影海报竖版构图，角色居中，比例 2:3，低照度侧光",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "lightingPreset": "侧光",
+        "reason": "规则匹配: 侧光关键词"
+      },
+      "compositionRecommendation": {
+        "orientation": "portrait",
+        "ratio": "2:3",
+        "reason": "规则匹配: 比例 2:3"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n电影海报竖版构图，角色居中，比例 2:3，低照度侧光\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 2:3 portrait, 2K (--ar 2:3)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBackgr"
+    },
+    {
+      "id": "S20",
+      "group": "orientation",
+      "prompt": "超宽银幕横版，比例 21:9，荒漠追车场景，强逆光",
+      "modelEndpointAvailable": false,
+      "inferredReco": {
+        "lightingPreset": "逆光",
+        "reason": "规则匹配: 逆光关键词"
+      },
+      "compositionRecommendation": {
+        "orientation": "landscape",
+        "ratio": "21:9",
+        "reason": "规则匹配: 比例 21:9"
+      },
+      "lightingRecommendation": {
+        "lights": {
+          "key": {
+            "on": true,
+            "type": "聚光灯",
+            "lumens": 5000
+          },
+          "fill": {
+            "on": true,
+            "type": "柔光箱",
+            "lumens": 2200
+          },
+          "back": {
+            "on": true,
+            "type": "发灯",
+            "lumens": 1800
+          },
+          "hair": {
+            "on": false,
+            "type": "发灯",
+            "lumens": 1000
+          }
+        },
+        "reason": "fallback"
+      },
+      "issues": [],
+      "status": "pass",
+      "optimizeModelError": "",
+      "optimizePreview": "",
+      "optimizeInputPreview": "Original prompt:\n超宽银幕横版，比例 21:9，荒漠追车场景，强逆光\n\nTarget style: 动漫/写实程度 6/10（半写实）\n\nComposition: 21:9 landscape, 2K (--ar 21:9)\n\nForeground elements (front to back):\n- 主体: center of frame, prominent, \"主要角色\", [focus: 面部表情]\n\nBack"
     }
   ]
 }

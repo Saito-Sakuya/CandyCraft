@@ -19,8 +19,17 @@ let editPopupEl = null;
 let dragState = null;
 let outsideHandler = null;  // click-outside listener ref
 let layerFilter = 'all';   // 'all' | 'foreground' | 'background'
+let focusMode = {
+  active: false,
+  targetId: null,
+  snapshot: null,
+};
 
 const DRAG_START_THRESHOLD_PX = 4;
+const MIN_ELEM_W = 8;
+const MIN_ELEM_H = 8;
+const MAX_ELEM_W = 90;
+const MAX_ELEM_H = 90;
 
 const LINK_TYPES = [
   { type: 'same-plane', label: '同一平面' },
@@ -67,6 +76,11 @@ export function initCanvas(boardId, layerPanelId, data) {
   links = [];
   selectedId = null;
   linkMode = false;
+  focusMode = {
+    active: false,
+    targetId: null,
+    snapshot: null,
+  };
 
   render();
   setupBoardEvents();
@@ -141,6 +155,11 @@ export function destroyCanvas() {
   elements = [];
   links = [];
   selectedId = null;
+  focusMode = {
+    active: false,
+    targetId: null,
+    snapshot: null,
+  };
   closeAllPopups();
 }
 
@@ -184,12 +203,16 @@ function renderElementBox(elem) {
   const isSelected = elem.id === selectedId;
   const isFg = elem.layer === 'foreground';
   const isChar = elem.type === 'character';
+  const isFocusTarget = focusMode.active && elem.id === focusMode.targetId;
+  const isFocusMuted = focusMode.active && elem.id !== focusMode.targetId;
 
   box.className = [
     'elem-box',
     isFg ? 'elem-fg' : 'elem-bg',
     isChar ? 'elem-char' : 'elem-obj',
     isSelected ? 'selected' : '',
+    isFocusTarget ? 'focus-target' : '',
+    isFocusMuted ? 'focus-muted' : '',
     linkMode && elem.id !== linkFromId ? 'link-target' : '',
   ].filter(Boolean).join(' ');
 
@@ -214,26 +237,39 @@ function renderElementBox(elem) {
         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
       </svg>
     </button>
+    <span class="elem-resize-handle" title="拖拽调整大小"></span>
   `;
 
   // Edit button
   box.querySelector('.elem-box-edit').addEventListener('click', (e) => {
     e.stopPropagation();
+    if (focusMode.active && focusMode.targetId !== elem.id) return;
     openEditPopup(elem.id);
+  });
+
+  box.querySelector('.elem-resize-handle').addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    if (focusMode.active && focusMode.targetId !== elem.id) return;
+    selectElement(elem.id);
+    startResize(e, elem, box);
   });
 
   // Click to select + drag
   box.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.elem-box-edit')) return;
+    if (e.target.closest('.elem-box-edit') || e.target.closest('.elem-resize-handle')) return;
 
     if (linkMode && elem.id !== linkFromId) {
       completeLinkPick(elem.id);
       return;
     }
 
+    if (focusMode.active && focusMode.targetId !== elem.id) {
+      return;
+    }
+
     e.stopPropagation();
 
-    if (e.altKey && !linkMode) {
+    if ((e.ctrlKey || e.metaKey) && !linkMode) {
       selectThroughOverlap(e.clientX, e.clientY);
       return;
     }
@@ -280,9 +316,11 @@ function renderLayerPanel() {
   const sorted = [...elements].sort((a, b) => b.zIndex - a.zIndex);
 
   sorted.forEach(elem => {
-    const tag = ce('div', `layer-tag ${elem.id === selectedId ? 'layer-tag-active' : ''}`);
+    const isFocusTarget = focusMode.active && elem.id === focusMode.targetId;
+    const isFocusMuted = focusMode.active && elem.id !== focusMode.targetId;
+    const tag = ce('div', `layer-tag ${elem.id === selectedId ? 'layer-tag-active' : ''} ${isFocusTarget ? 'layer-tag-focus-target' : ''} ${isFocusMuted ? 'layer-tag-focus-muted' : ''}`);
     tag.dataset.id = elem.id;
-    tag.draggable = true;
+    tag.draggable = !focusMode.active;
 
     const isFg = elem.layer === 'foreground';
     const isChar = elem.type === 'character';
@@ -302,11 +340,19 @@ function renderLayerPanel() {
     // Click to select
     tag.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;
+      if (e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        enterFocusMode(elem.id);
+        return;
+      }
+      if (focusMode.active && elem.id !== focusMode.targetId) return;
       selectElement(elem.id);
       scrollToElement(elem.id);
     });
     tag.addEventListener('dblclick', (e) => {
       if (e.target.closest('button')) return;
+      if (focusMode.active && elem.id !== focusMode.targetId) return;
       e.preventDefault();
       e.stopPropagation();
       openEditPopup(elem.id);
@@ -314,6 +360,7 @@ function renderLayerPanel() {
 
     tag.querySelector('.layer-tag-edit').addEventListener('click', (e) => {
       e.stopPropagation();
+      if (focusMode.active && elem.id !== focusMode.targetId) return;
       selectElement(elem.id);
       openEditPopup(elem.id);
     });
@@ -321,23 +368,27 @@ function renderLayerPanel() {
     // Move up (increase z-index)
     tag.querySelector('.layer-tag-up').addEventListener('click', (e) => {
       e.stopPropagation();
+      if (focusMode.active) return;
       moveLayer(elem.id, 1);
     });
 
     // Move down (decrease z-index)
     tag.querySelector('.layer-tag-down').addEventListener('click', (e) => {
       e.stopPropagation();
+      if (focusMode.active) return;
       moveLayer(elem.id, -1);
     });
 
     // Delete
     tag.querySelector('.layer-tag-del').addEventListener('click', (e) => {
       e.stopPropagation();
+      if (focusMode.active) return;
       deleteElement(elem.id);
     });
 
     // Drag-to-reorder
     tag.addEventListener('dragstart', (e) => {
+      if (focusMode.active) return;
       e.dataTransfer.setData('text/plain', elem.id);
       tag.classList.add('layer-tag-dragging');
     });
@@ -345,6 +396,7 @@ function renderLayerPanel() {
       tag.classList.remove('layer-tag-dragging');
     });
     tag.addEventListener('dragover', (e) => {
+      if (focusMode.active) return;
       e.preventDefault();
       tag.classList.add('layer-tag-dragover');
     });
@@ -352,6 +404,7 @@ function renderLayerPanel() {
       tag.classList.remove('layer-tag-dragover');
     });
     tag.addEventListener('drop', (e) => {
+      if (focusMode.active) return;
       e.preventDefault();
       tag.classList.remove('layer-tag-dragover');
       const draggedId = e.dataTransfer.getData('text/plain');
@@ -365,14 +418,19 @@ function renderLayerPanel() {
 
   layerPanelEl.appendChild(list);
 
+  if (focusMode.active) {
+    layerPanelEl.appendChild(renderFocusModeBar());
+  }
+
   // Footer: link button
   const footer = ce('div', 'layer-footer');
   footer.innerHTML = `
-    <button class="layer-link-btn ${linkMode ? 'active' : ''}" title="选两个元素建立链接">
+    <button class="layer-link-btn ${linkMode ? 'active' : ''}" title="选两个元素建立链接" ${focusMode.active ? 'disabled' : ''}>
       ${linkMode ? '取消链接' : '建立链接'}
     </button>
   `;
   footer.querySelector('.layer-link-btn').addEventListener('click', () => {
+    if (focusMode.active) return;
     if (linkMode) {
       linkMode = false;
       linkFromId = null;
@@ -419,6 +477,26 @@ function renderLayerPanel() {
   }
 }
 
+function renderFocusModeBar() {
+  const bar = ce('div', 'layer-focus-actions');
+  const target = elements.find((e) => e.id === focusMode.targetId);
+  const targetName = target?.name || '未命名元素';
+  bar.innerHTML = `
+    <span class="layer-focus-label">聚焦中：${esc(trunc(targetName, 10))}</span>
+    <button class="layer-focus-cancel">取消选择</button>
+    <button class="layer-focus-apply">完成</button>
+  `;
+
+  bar.querySelector('.layer-focus-cancel')?.addEventListener('click', () => {
+    exitFocusMode(false);
+  });
+  bar.querySelector('.layer-focus-apply')?.addEventListener('click', () => {
+    exitFocusMode(true);
+  });
+
+  return bar;
+}
+
 /* ============ Layer Operations ============ */
 
 function moveLayer(id, direction) {
@@ -452,6 +530,13 @@ function deleteElement(id) {
   elements = elements.filter(e => e.id !== id);
   links = links.filter(l => l.fromId !== id && l.toId !== id);
   if (selectedId === id) selectedId = null;
+  if (focusMode.active && focusMode.targetId === id) {
+    focusMode = {
+      active: false,
+      targetId: null,
+      snapshot: null,
+    };
+  }
   // Reindex
   elements.sort((a, b) => a.zIndex - b.zIndex).forEach((e, i) => e.zIndex = i);
   render();
@@ -469,6 +554,50 @@ function selectElement(id) {
   });
 }
 
+function enterFocusMode(id) {
+  const target = elements.find((e) => e.id === id);
+  if (!target) return;
+
+  focusMode = {
+    active: true,
+    targetId: id,
+    snapshot: {
+      x: target.x,
+      y: target.y,
+      w: target.w,
+      h: target.h,
+    },
+  };
+  selectedId = id;
+  closeAllPopups();
+  render();
+  showToast('已进入聚焦模式：可拖拽和缩放该对象，完成后点击“完成”保存', 'info');
+}
+
+function exitFocusMode(save) {
+  if (!focusMode.active) return;
+  const { targetId, snapshot } = focusMode;
+  if (!save && targetId && snapshot) {
+    const target = elements.find((e) => e.id === targetId);
+    if (target) {
+      target.x = snapshot.x;
+      target.y = snapshot.y;
+      target.w = snapshot.w;
+      target.h = snapshot.h;
+    }
+    showToast('已取消聚焦修改', 'info');
+  } else if (save) {
+    showToast('已保存聚焦修改', 'success');
+  }
+
+  focusMode = {
+    active: false,
+    targetId: null,
+    snapshot: null,
+  };
+  render();
+}
+
 function scrollToElement(id) {
   const box = boardEl?.querySelector(`.elem-box[data-id="${id}"]`);
   if (box) {
@@ -482,6 +611,7 @@ function scrollToElement(id) {
 /* ============ Drag ============ */
 
 function startDrag(e, elem, boxEl) {
+  if (focusMode.active && focusMode.targetId !== elem.id) return;
   e.preventDefault();
   const boardRect = boardEl.getBoundingClientRect();
   let didDrag = false;
@@ -504,14 +634,17 @@ function startDrag(e, elem, boxEl) {
 
     const dx = ((ev.clientX - dragState.startX) / boardRect.width) * 100;
     const dy = ((ev.clientY - dragState.startY) / boardRect.height) * 100;
-    elem.x = clamp(dragState.origX + dx, 5, 95);
-    elem.y = clamp(dragState.origY + dy, 5, 95);
+    const nextX = dragState.origX + dx;
+    const nextY = dragState.origY + dy;
+    const halfW = elem.w / 2;
+    const halfH = elem.h / 2;
+    elem.x = clamp(nextX, halfW, 100 - halfW);
+    elem.y = clamp(nextY, halfH, 100 - halfH);
 
     boxEl.style.left = `${elem.x}%`;
     boxEl.style.top = `${elem.y}%`;
 
-    // Show coords
-    showCoordTooltip(boxEl, elem.x, elem.y);
+    showCoordTooltip(boxEl, elem);
 
     // Update link lines
     renderLinkLines();
@@ -519,6 +652,52 @@ function startDrag(e, elem, boxEl) {
 
   const up = () => {
     dragState = null;
+    hideCoordTooltip(boxEl);
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+  };
+
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+}
+
+function startResize(e, elem, boxEl) {
+  if (focusMode.active && focusMode.targetId !== elem.id) return;
+  e.preventDefault();
+  const boardRect = boardEl.getBoundingClientRect();
+  let didResize = false;
+
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const origW = elem.w;
+  const origH = elem.h;
+
+  const move = (ev) => {
+    const deltaX = ev.clientX - startX;
+    const deltaY = ev.clientY - startY;
+    if (!didResize && Math.hypot(deltaX, deltaY) < DRAG_START_THRESHOLD_PX) return;
+    didResize = true;
+
+    const dw = (deltaX / boardRect.width) * 200;
+    const dh = (deltaY / boardRect.height) * 200;
+
+    elem.w = clamp(origW + dw, MIN_ELEM_W, MAX_ELEM_W);
+    elem.h = clamp(origH + dh, MIN_ELEM_H, MAX_ELEM_H);
+
+    const halfW = elem.w / 2;
+    const halfH = elem.h / 2;
+    elem.x = clamp(elem.x, halfW, 100 - halfW);
+    elem.y = clamp(elem.y, halfH, 100 - halfH);
+
+    boxEl.style.width = `${elem.w}%`;
+    boxEl.style.height = `${elem.h}%`;
+    boxEl.style.left = `${elem.x}%`;
+    boxEl.style.top = `${elem.y}%`;
+    showCoordTooltip(boxEl, elem);
+    renderLinkLines();
+  };
+
+  const up = () => {
     hideCoordTooltip(boxEl);
     document.removeEventListener('pointermove', move);
     document.removeEventListener('pointerup', up);
@@ -541,14 +720,14 @@ function selectThroughOverlap(clientX, clientY) {
   selectElement(nextId);
 }
 
-function showCoordTooltip(boxEl, x, y) {
+function showCoordTooltip(boxEl, elem) {
   let tip = boxEl.querySelector('.elem-box-coords');
   if (!tip) {
     tip = document.createElement('span');
     tip.className = 'elem-box-coords';
     boxEl.appendChild(tip);
   }
-  tip.textContent = `(${Math.round(x)}, ${Math.round(y)})`;
+  tip.textContent = `X${Math.round(elem.x)} Y${Math.round(elem.y)} · ${Math.round(elem.w)}x${Math.round(elem.h)}`;
 }
 
 function hideCoordTooltip(boxEl) {
@@ -781,7 +960,11 @@ function setupBoardEvents() {
   // Click on empty area to deselect
   boardEl.addEventListener('pointerdown', (e) => {
     if (e.target === boardEl || e.target.classList.contains('canvas-crosshair-h') || e.target.classList.contains('canvas-crosshair-v')) {
-      selectedId = null;
+      if (!focusMode.active) {
+        selectedId = null;
+      } else {
+        selectedId = focusMode.targetId;
+      }
       if (linkMode) {
         linkMode = false;
         linkFromId = null;
@@ -797,7 +980,9 @@ function setupBoardEvents() {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     if (e.key === 'Escape') {
-      if (linkMode) {
+      if (focusMode.active) {
+        exitFocusMode(false);
+      } else if (linkMode) {
         linkMode = false;
         linkFromId = null;
         render();
@@ -808,6 +993,7 @@ function setupBoardEvents() {
       }
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+      if (focusMode.active && selectedId !== focusMode.targetId) return;
       deleteElement(selectedId);
     }
   });

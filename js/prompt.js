@@ -5,6 +5,8 @@
  */
 
 import { normalizeSceneRecommendation } from './scene-recommendation.js';
+import { normalizeCompositionRecommendation } from './composition-recommendation.js';
+import { normalizeLightingRecommendation } from './lighting-recommendation.js';
 
 /* ---- Analysis Phase System Prompt (v3) ---- */
 const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾问。
@@ -48,6 +50,11 @@ const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾
    - colorTemp: "冷蓝" | "自然" | "暖黄" | "金橙"
    - lightQuality: "硬光" | "中性" | "柔光"
    - cameraPreset: "平视" | "俯拍" | "仰拍" | "鸟瞰" | "45°斜角"
+   - reason: 简短理由（可选）
+
+5. "compositionRecommendation"（可选）:
+   - orientation: "landscape" | "portrait" | "square"
+   - ratio: 合法比例字符串（如 "16:9", "9:16", "2:3", "9:21"）
    - reason: 简短理由（可选）
 
 注意：
@@ -159,6 +166,51 @@ export function buildAnalysisMessages(userPrompt, styleLevel = 3) {
 }
 
 /**
+ * Build second-round messages for light tuning recommendation.
+ * @param {string} userPrompt
+ * @param {Object} context
+ */
+export function buildLightingMessages(userPrompt, context = {}) {
+  const sceneRecommendation = context.sceneRecommendation || {};
+  const compositionRecommendation = context.compositionRecommendation || {};
+
+  const systemPrompt = `你是一位影视布光顾问。请基于用户提示词和第一轮分析上下文，输出逐灯设置建议。
+
+只输出 JSON 对象，格式如下：
+{
+  "lights": {
+    "light1": { "on": true, "type": "聚光灯", "lumens": 5000 },
+    "light2": { "on": true, "type": "柔光箱", "lumens": 2200 },
+    "light3": { "on": true, "type": "发灯", "lumens": 1800 },
+    "light4": { "on": false, "type": "发灯", "lumens": 1000 }
+  },
+  "reason": "简短说明"
+}
+
+约束：
+1. type 只能使用：聚光灯/柔光箱/环形灯/菲涅尔灯/发灯/反光板/霓虹灯/蜡烛
+2. lumens 必须是 100~100000 的整数
+3. on 必须是布尔值
+4. lights 必须返回 4 盏灯，优先使用 light1/light2/light3/light4 命名
+5. 兼容旧命名 key/fill/back/hair 也可接受，但优先输出 light1~4
+6. 不要输出 markdown 代码块，不要输出解释文本`;
+
+  const userMessage = `原始提示词:
+${userPrompt}
+
+第一轮场景建议:
+${JSON.stringify(sceneRecommendation, null, 2)}
+
+第一轮构图建议:
+${JSON.stringify(compositionRecommendation, null, 2)}`;
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+}
+
+/**
  * Build messages for the optimization phase (v3 — full parameters)
  * @param {string} userPrompt — original prompt
  * @param {Object} params — all optimization parameters
@@ -187,7 +239,7 @@ export function buildOptimizeMessages(userPrompt, params) {
     const r = composition.ratio || '16:9';
     const o = composition.orientation || 'landscape';
     const res = composition.resolution || '';
-    const oLabel = o === 'landscape' ? 'landscape' : 'portrait';
+    const oLabel = o === 'portrait' ? 'portrait' : o === 'square' ? 'square' : 'landscape';
     compDesc = `${r} ${oLabel}${res ? `, ${res}` : ''} (--ar ${r})`;
   } else {
     const compMap = { '16:9': '16:9 landscape (--ar 16:9)', '9:16': '9:16 portrait (--ar 9:16)', '1:1': '1:1 square (--ar 1:1)' };
@@ -316,50 +368,26 @@ ${sceneDesc}`;
  * Now expects a JSON object with { dimensions, characters, presets }
  * Falls back to v1 array format for backward compatibility
  * @param {string} text — raw AI response
- * @returns {{ dimensions: Array, elements: Array|null, characters: Array, presets: Array, sceneRecommendation: Object|null } | null}
+ * @returns {{ dimensions: Array, elements: Array|null, characters: Array, presets: Array, sceneRecommendation: Object|null, compositionRecommendation: Object|null } | null}
  */
 export function parseAnalysisResponse(text) {
   if (!text || typeof text !== 'string') return null;
 
-  let cleaned = text.trim();
-  let parsed = null;
-
-  // Try multiple extraction strategies
-  const extractors = [
-    // 1. Direct parse
-    (t) => JSON.parse(t),
-    // 2. Code block extraction
-    (t) => {
-      const m = t.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-      return m ? JSON.parse(m[1].trim()) : null;
-    },
-    // 3. Find first { and last }
-    (t) => {
-      const fi = t.indexOf('{');
-      const li = t.lastIndexOf('}');
-      return (fi !== -1 && li > fi) ? JSON.parse(t.substring(fi, li + 1)) : null;
-    },
-    // 4. Find first [ and last ] (v1 backward compat)
-    (t) => {
-      const fi = t.indexOf('[');
-      const li = t.lastIndexOf(']');
-      return (fi !== -1 && li > fi) ? JSON.parse(t.substring(fi, li + 1)) : null;
-    },
-  ];
-
-  for (const extractor of extractors) {
-    try {
-      const result = extractor(cleaned);
-      if (result) { parsed = result; break; }
-    } catch { /* try next */ }
-  }
+  const parsed = tryParseJsonWithExtractors(text);
 
   if (!parsed) return null;
 
   // v1 backward compatibility: if result is an array, treat as dimensions only
   if (Array.isArray(parsed)) {
     const dims = normalizeDimensions(parsed);
-    return dims ? { dimensions: dims, elements: null, characters: [], presets: [], sceneRecommendation: null } : null;
+    return dims ? {
+      dimensions: dims,
+      elements: null,
+      characters: [],
+      presets: [],
+      sceneRecommendation: null,
+      compositionRecommendation: null,
+    } : null;
   }
 
   // v2/v3 object format
@@ -373,10 +401,57 @@ export function parseAnalysisResponse(text) {
     const characters = normalizeCharacters(parsed.characters || []);
     const presets = normalizePresets(parsed.presets || [], dimensions);
     const sceneRecommendation = normalizeSceneRecommendation(parsed.sceneRecommendation);
+    const compositionRecommendation = normalizeCompositionRecommendation(parsed.compositionRecommendation);
 
-    return { dimensions, elements, characters, presets, sceneRecommendation };
+    return { dimensions, elements, characters, presets, sceneRecommendation, compositionRecommendation };
   }
 
+  return null;
+}
+
+/**
+ * Parse second-round light tuning response.
+ * @param {string} text
+ * @returns {{ lights: Object, reason?: string } | null}
+ */
+export function parseLightingRecommendationResponse(text) {
+  if (!text || typeof text !== 'string') return null;
+  const parsed = tryParseJsonWithExtractors(text);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return normalizeLightingRecommendation(parsed);
+}
+
+function tryParseJsonWithExtractors(text) {
+  if (typeof text !== 'string') return null;
+  const cleaned = text.trim();
+  if (!cleaned) return null;
+
+  const extractors = [
+    (t) => JSON.parse(t),
+    (t) => {
+      const m = t.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+      return m ? JSON.parse(m[1].trim()) : null;
+    },
+    (t) => {
+      const fi = t.indexOf('{');
+      const li = t.lastIndexOf('}');
+      return (fi !== -1 && li > fi) ? JSON.parse(t.substring(fi, li + 1)) : null;
+    },
+    (t) => {
+      const fi = t.indexOf('[');
+      const li = t.lastIndexOf(']');
+      return (fi !== -1 && li > fi) ? JSON.parse(t.substring(fi, li + 1)) : null;
+    },
+  ];
+
+  for (const extractor of extractors) {
+    try {
+      const result = extractor(cleaned);
+      if (result) return result;
+    } catch {
+      // ignore and continue
+    }
+  }
   return null;
 }
 

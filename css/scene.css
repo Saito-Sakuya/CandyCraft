@@ -177,6 +177,16 @@
   cursor: grabbing;
 }
 
+.scene-coverage {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 1;
+  transform-origin: 50% 50%;
+  background: var(--coverage-color, rgba(255, 255, 255, 0.2));
+}
+
 .scene-drag-coords {
   position: absolute;
   top: -18px;
@@ -204,6 +214,11 @@
 .scene-light[data-type="back"] {
   background: var(--color-candy-peach);
   box-shadow: 0 0 10px rgba(255, 185, 151, 0.4);
+}
+
+.scene-light[data-type="hair"] {
+  background: var(--color-candy-lavender);
+  box-shadow: 0 0 10px rgba(195, 166, 255, 0.45);
 }
 
 /* ---- Legend ---- */
@@ -284,6 +299,26 @@
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
   padding: 2px 6px;
+}
+
+.scene-mobile-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.scene-fold {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.scene-fold-summary {
+  display: none;
+}
+
+.scene-fold-body {
+  margin: 0;
 }
 
 /* ---- Scene Controls ---- */
@@ -532,13 +567,73 @@
 }
 
 /* ---- Responsive ---- */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
+  .scene-view {
+    min-height: 180px;
+  }
+
+  .scene-fold {
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.55);
+    overflow: hidden;
+  }
+
+  .scene-fold-summary {
+    display: block;
+    list-style: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    padding: 10px 12px;
+    border-bottom: 1px solid transparent;
+    user-select: none;
+    position: relative;
+  }
+
+  .scene-fold-summary::after {
+    content: '▾';
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-tertiary);
+    transition: transform var(--transition-fast);
+  }
+
+  .scene-fold[open] .scene-fold-summary {
+    border-bottom-color: var(--color-border-light);
+  }
+
+  .scene-fold[open] .scene-fold-summary::after {
+    transform: translateY(-50%) rotate(180deg);
+  }
+
+  .scene-fold-body {
+    padding: 10px 10px 12px;
+  }
+
+  .scene-fold-views .scene-fold-body {
+    padding-top: 8px;
+  }
+
+  .scene-fold-legend .scene-fold-body {
+    padding-top: 6px;
+  }
+
+  .scene-fold-lights .scene-fold-body {
+    max-height: 360px;
+    overflow: auto;
+  }
+
+  .scene-fold-controls .scene-fold-body {
+    padding-top: 8px;
+  }
+
   .scene-views {
     grid-template-columns: 1fr;
-  }
-  .scene-view {
-    max-width: 200px;
-    margin: 0 auto;
+    gap: 8px;
   }
 }
 

@@ -4,9 +4,19 @@ import process from 'node:process';
 import {
   buildAnalysisMessages,
   buildOptimizeMessages,
+  buildLightingMessages,
   parseAnalysisResponse,
+  parseLightingRecommendationResponse,
 } from '../../js/prompt.js';
 import { inferSceneRecommendationFromPrompt } from '../../js/scene-recommendation.js';
+import {
+  inferCompositionRecommendationFromPrompt,
+  mergeCompositionRecommendations,
+} from '../../js/composition-recommendation.js';
+import {
+  LIGHT_TYPE_ENUMS,
+  normalizeLightingRecommendation,
+} from '../../js/lighting-recommendation.js';
 
 const CLARITY_RESULTS_PATH = path.resolve('audit/clarity/prompt-clarity-results.json');
 const CLARITY_REPORT_PATH = path.resolve('audit/clarity/prompt-clarity-report.md');
@@ -32,6 +42,8 @@ const SAMPLES = [
   { id: 'S16', group: 'style', prompt: '照片级写实街拍，清晨雾气，自然肤色，低饱和电影调色' },
   { id: 'S17', group: 'detail', prompt: '微距拍摄机械手表，金属反射细节，极致清晰，黑色背景' },
   { id: 'S18', group: 'detail', prompt: '极简主义客厅，白墙与木质家具，柔和自然光，安静氛围' },
+  { id: 'S19', group: 'orientation', prompt: '电影海报竖版构图，角色居中，比例 2:3，低照度侧光' },
+  { id: 'S20', group: 'orientation', prompt: '超宽银幕横版，比例 21:9，荒漠追车场景，强逆光' },
 ];
 
 const DEFAULT_DIMENSIONS = [
@@ -64,12 +76,44 @@ function makeSceneFromReco(reco) {
     colorTemp: `${normalized.colorTemp || colorTempMap[timeOfDay] || '自然'} (rule-based)`,
     timeOfDay: `${timeOfDay} (rule-based)`,
     lights: {
-      'key light': { on: true, type: '聚光灯', typeEn: 'spotlight, hard directional light', watts: 500, lumens: 5000, subjectLumens: 2600 },
-      'fill light': { on: true, type: '柔光箱', typeEn: 'softbox, diffused soft light', watts: 220, lumens: 2200, subjectLumens: 1100 },
-      'back light': { on: true, type: '发灯', typeEn: 'hair light, rim light, edge separation', watts: 180, lumens: 1800, subjectLumens: 800 },
-      'hair light': { on: false, type: '发灯', typeEn: 'hair light, rim light, edge separation', watts: 100, lumens: 1000, subjectLumens: 0 },
+      'light source 1': { alias: 'key', on: true, type: '聚光灯', typeEn: 'spotlight, hard directional light', watts: 500, lumens: 5000, subjectLumens: 2600 },
+      'light source 2': { alias: 'fill', on: true, type: '柔光箱', typeEn: 'softbox, diffused soft light', watts: 220, lumens: 2200, subjectLumens: 1100 },
+      'light source 3': { alias: 'back', on: true, type: '发灯', typeEn: 'hair light, rim light, edge separation', watts: 180, lumens: 1800, subjectLumens: 800 },
+      'light source 4': { alias: 'hair', on: false, type: '发灯', typeEn: 'hair light, rim light, edge separation', watts: 100, lumens: 1000, subjectLumens: 0 },
     },
   };
+}
+
+function makeCompositionFromReco(compositionReco) {
+  const ratio = compositionReco?.ratio || '16:9';
+  const orientation = compositionReco?.orientation || inferOrientationFromRatioText(ratio) || 'landscape';
+  return {
+    ratio,
+    orientation,
+    resolution: '2K',
+  };
+}
+
+function inferOrientationFromRatioText(ratioText) {
+  const m = String(ratioText || '').match(/^(\d+):(\d+)$/);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (w === h) return 'square';
+  return w > h ? 'landscape' : 'portrait';
+}
+
+function buildFallbackLightingRecommendation(scene) {
+  const raw = {
+    lights: {
+      light1: { on: true, type: '聚光灯', lumens: scene?.lights?.['light source 1']?.lumens ?? 5000 },
+      light2: { on: true, type: '柔光箱', lumens: scene?.lights?.['light source 2']?.lumens ?? 2200 },
+      light3: { on: true, type: '发灯', lumens: scene?.lights?.['light source 3']?.lumens ?? 1800 },
+      light4: { on: false, type: '发灯', lumens: scene?.lights?.['light source 4']?.lumens ?? 1000 },
+    },
+    reason: 'fallback',
+  };
+  return normalizeLightingRecommendation(raw);
 }
 
 function extractContentFromChatResponse(json) {
@@ -95,7 +139,7 @@ async function callChat(messages) {
   return response.json();
 }
 
-function collectIssues({ optimizeInput, optimizedPrompt, inferredReco }) {
+function collectIssues({ optimizeInput, optimizedPrompt, inferredReco, composition, lightingRecommendation }) {
   const issues = [];
   const text = `${optimizeInput}\n${optimizedPrompt || ''}`.toLowerCase();
   const has = (patterns) => patterns.some((pattern) => text.includes(pattern));
@@ -116,6 +160,37 @@ function collectIssues({ optimizeInput, optimizedPrompt, inferredReco }) {
       code: 'invalid_ar_parameter',
       message: `构图参数 --ar 数量异常（${arMatches.length}）。`,
       suggestion: '确保只输出一个合法的 --ar W:H。',
+    });
+  } else {
+    const targetRatio = composition?.ratio || '';
+    const arRatio = arMatches[0].replace('--ar', '').trim();
+    if (targetRatio && arRatio !== targetRatio) {
+      issues.push({
+        severity: 'high',
+        code: 'ar_ratio_mismatch',
+        message: `--ar 比例与构图推荐不一致（ar=${arRatio}, comp=${targetRatio}）。`,
+        suggestion: '确保最终 prompt 的 --ar 与 composition.ratio 一致。',
+      });
+    }
+  }
+
+  if (!/light source 1/i.test(optimizeInput) || !/light source 4/i.test(optimizeInput)) {
+    issues.push({
+      severity: 'medium',
+      code: 'light_source_label_missing',
+      message: '优化输入未完整包含 light source 1~4 的逐灯语义。',
+      suggestion: '确保 Camera & lighting 段落包含四盏光源的结构化信息。',
+    });
+  }
+
+  const orientation = composition?.orientation || '';
+  const ratioOrientation = inferOrientationFromRatioText(composition?.ratio || '');
+  if (orientation && ratioOrientation && orientation !== ratioOrientation) {
+    issues.push({
+      severity: 'high',
+      code: 'orientation_ratio_conflict',
+      message: `构图方向与比例冲突（orientation=${orientation}, ratio=${composition?.ratio}）。`,
+      suggestion: '方向与比例需语义一致（portrait 对应 H>W，landscape 对应 W>H）。',
     });
   }
 
@@ -155,6 +230,53 @@ function collectIssues({ optimizeInput, optimizedPrompt, inferredReco }) {
     });
   }
 
+  if (!lightingRecommendation?.lights || typeof lightingRecommendation.lights !== 'object') {
+    issues.push({
+      severity: 'high',
+      code: 'missing_lighting_recommendation',
+      message: '第二轮逐灯建议缺失或结构非法。',
+      suggestion: '确保返回 lights.key/fill/back/hair 的 on/type/lumens。',
+    });
+    return issues;
+  }
+
+  for (const key of ['key', 'fill', 'back', 'hair']) {
+    const light = lightingRecommendation.lights[key];
+    if (!light) {
+      issues.push({
+        severity: 'medium',
+        code: `missing_light_${key}`,
+        message: `逐灯建议缺失 ${key}。`,
+        suggestion: '补齐四盏灯建议，避免默认值冲突。',
+      });
+      continue;
+    }
+    if (typeof light.on !== 'boolean') {
+      issues.push({
+        severity: 'medium',
+        code: `invalid_on_${key}`,
+        message: `${key}.on 不是布尔值。`,
+        suggestion: 'on 字段仅允许 true/false。',
+      });
+    }
+    if (!LIGHT_TYPE_ENUMS.includes(light.type)) {
+      issues.push({
+        severity: 'medium',
+        code: `invalid_type_${key}`,
+        message: `${key}.type 不在允许灯型枚举中。`,
+        suggestion: 'type 仅允许既定灯型中文枚举。',
+      });
+    }
+    if (!Number.isFinite(light.lumens) || light.lumens < 100 || light.lumens > 100000) {
+      issues.push({
+        severity: 'medium',
+        code: `invalid_lumens_${key}`,
+        message: `${key}.lumens 超出范围或格式非法。`,
+        suggestion: 'lumens 应为 100~100000 的整数。',
+      });
+    }
+  }
+
   return issues;
 }
 
@@ -172,6 +294,7 @@ async function runLocalClarityAudit() {
   const results = [];
   for (const sample of SAMPLES) {
     const inferredReco = inferSceneRecommendationFromPrompt(sample.prompt);
+    const ruleCompositionRecommendation = inferCompositionRecommendationFromPrompt(sample.prompt);
     const analysisMessages = buildAnalysisMessages(sample.prompt, 6);
 
     let analysisParsed = null;
@@ -187,11 +310,18 @@ async function runLocalClarityAudit() {
     }
 
     const dimensions = analysisParsed?.dimensions?.length ? analysisParsed.dimensions : DEFAULT_DIMENSIONS;
+    const aiCompositionRecommendation = analysisParsed?.compositionRecommendation || null;
+    const compositionReco = mergeCompositionRecommendations({
+      current: { ratio: '16:9', orientation: 'landscape' },
+      rule: ruleCompositionRecommendation,
+      ai: aiCompositionRecommendation,
+    });
+    const composition = makeCompositionFromReco(compositionReco);
     const scene = makeSceneFromReco(inferredReco);
 
     const optimizeMessages = buildOptimizeMessages(sample.prompt, {
       dimensions,
-      composition: { ratio: '16:9', orientation: 'landscape', resolution: '2K' },
+      composition,
       elements: DEFAULT_ELEMENTS,
       links: [],
       scene,
@@ -201,6 +331,7 @@ async function runLocalClarityAudit() {
     const optimizeInput = optimizeMessages[1]?.content || '';
     let optimizedPrompt = '';
     let optimizeModelError = '';
+    let lightingRecommendation = buildFallbackLightingRecommendation(scene);
 
     if (modelEndpointAvailable) {
       try {
@@ -209,15 +340,38 @@ async function runLocalClarityAudit() {
       } catch (error) {
         optimizeModelError = error?.message || String(error);
       }
+
+      try {
+        const lightingMessages = buildLightingMessages(sample.prompt, {
+          sceneRecommendation: inferredReco || null,
+          compositionRecommendation: compositionReco || null,
+        });
+        const json = await callChat(lightingMessages);
+        const lightingRaw = extractContentFromChatResponse(json);
+        const parsedLighting = parseLightingRecommendationResponse(lightingRaw);
+        if (parsedLighting) {
+          lightingRecommendation = parsedLighting;
+        }
+      } catch {
+        // keep fallback recommendation
+      }
     }
 
-    const issues = collectIssues({ optimizeInput, optimizedPrompt, inferredReco });
+    const issues = collectIssues({
+      optimizeInput,
+      optimizedPrompt,
+      inferredReco,
+      composition,
+      lightingRecommendation,
+    });
     results.push({
       id: sample.id,
       group: sample.group,
       prompt: sample.prompt,
       modelEndpointAvailable,
       inferredReco: inferredReco || null,
+      compositionRecommendation: compositionReco || null,
+      lightingRecommendation,
       issues,
       status: issues.length ? 'fail' : 'pass',
       optimizeModelError,

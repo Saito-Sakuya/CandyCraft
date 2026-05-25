@@ -1,11 +1,11 @@
 # Prompt Clarity Audit Report
 
-- Timestamp: 2026-05-24T17:37:15.511Z
+- Timestamp: 2026-05-25T07:34:46.216Z
 - Chat endpoint: http://127.0.0.1:8788/api/chat
 - Endpoint available: no
-- Endpoint error: HTTP 500: {"error":{"code":"server_not_configured","message":"服务端未完成配置，请联系管理员设置 UPSTREAM_BASE_URL 与 UPSTREAM_API_KEY"},"requestId":"bc46b6e2-5bf9-45ad-98d6-4e468ada6df5"}
-- Samples: 18
-- Pass: 18
+- Endpoint error: HTTP 500: {"error":{"code":"server_not_configured","message":"服务端未完成配置，请联系管理员设置 UPSTREAM_BASE_URL 与 UPSTREAM_API_KEY"},"requestId":"9ee69e30-330d-4912-953c-2133db6f3d2d"}
+- Samples: 20
+- Pass: 20
 - Fail: 0
 - Pass rate: 100.0%
 
@@ -29,6 +29,8 @@
 | S16 | style | PASS | 0 | 无明显歧义 |
 | S17 | detail | PASS | 0 | 无明显歧义 |
 | S18 | detail | PASS | 0 | 无明显歧义 |
+| S19 | orientation | PASS | 0 | 无明显歧义 |
+| S20 | orientation | PASS | 0 | 无明显歧义 |
 
 ## Detailed Issues
 - S01: PASS
@@ -49,6 +51,8 @@
 - S16: PASS
 - S17: PASS
 - S18: PASS
+- S19: PASS
+- S20: PASS
 
 ## L2 Real Image Check
 - This run only auto-generates image check file when both `BFL_API_KEY` and `STABILITY_API_KEY` are present.
