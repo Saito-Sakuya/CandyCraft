@@ -211,6 +211,53 @@ ${JSON.stringify(compositionRecommendation, null, 2)}`;
 }
 
 /**
+ * Build retry messages for second-round light tuning when first attempt is invalid.
+ * The retry contract is stricter and only accepts light1~4 keys.
+ */
+export function buildLightingRetryMessages(userPrompt, context = {}, failureSummary = '') {
+  const sceneRecommendation = context.sceneRecommendation || {};
+  const compositionRecommendation = context.compositionRecommendation || {};
+
+  const systemPrompt = `你是影视布光纠错器。上一次输出不符合结构，请严格按 schema 返回。
+
+只输出 JSON：
+{
+  "lights": {
+    "light1": { "on": true, "type": "聚光灯", "lumens": 5000 },
+    "light2": { "on": true, "type": "柔光箱", "lumens": 2200 },
+    "light3": { "on": true, "type": "发灯", "lumens": 1800 },
+    "light4": { "on": false, "type": "发灯", "lumens": 1000 }
+  },
+  "reason": "简短说明"
+}
+
+硬性要求：
+1. 仅允许 light1/light2/light3/light4 四个键，不要 key/fill/back/hair
+2. 每盏灯必须同时包含 on/type/lumens
+3. on 必须是布尔值
+4. type 只能是：聚光灯/柔光箱/环形灯/菲涅尔灯/发灯/反光板/霓虹灯/蜡烛
+5. lumens 必须是 100~100000 的整数
+6. 禁止 markdown、禁止解释文字、禁止额外字段`;
+
+  const userMessage = `原始提示词:
+${userPrompt}
+
+第一轮场景建议:
+${JSON.stringify(sceneRecommendation, null, 2)}
+
+第一轮构图建议:
+${JSON.stringify(compositionRecommendation, null, 2)}
+
+上次失败原因:
+${failureSummary || '结构不完整或字段非法'}`;
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+}
+
+/**
  * Build messages for the optimization phase (v3 — full parameters)
  * @param {string} userPrompt — original prompt
  * @param {Object} params — all optimization parameters
@@ -415,10 +462,37 @@ export function parseAnalysisResponse(text) {
  * @returns {{ lights: Object, reason?: string } | null}
  */
 export function parseLightingRecommendationResponse(text) {
-  if (!text || typeof text !== 'string') return null;
+  const envelope = parseLightingRecommendationEnvelope(text);
+  return envelope?.recommendation || null;
+}
+
+/**
+ * Parse second-round light tuning response with raw payload metadata.
+ * @param {string} text
+ * @returns {{ recommendation: { lights: Object, reason?: string } | null, raw: Object | null, parseError: string | null }}
+ */
+export function parseLightingRecommendationEnvelope(text) {
+  if (!text || typeof text !== 'string') {
+    return {
+      recommendation: null,
+      raw: null,
+      parseError: 'empty_text',
+    };
+  }
   const parsed = tryParseJsonWithExtractors(text);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  return normalizeLightingRecommendation(parsed);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {
+      recommendation: null,
+      raw: null,
+      parseError: 'invalid_json_object',
+    };
+  }
+  const recommendation = normalizeLightingRecommendation(parsed);
+  return {
+    recommendation,
+    raw: parsed,
+    parseError: recommendation ? null : 'normalize_failed',
+  };
 }
 
 function tryParseJsonWithExtractors(text) {

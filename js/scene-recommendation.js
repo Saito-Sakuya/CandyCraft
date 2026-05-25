@@ -97,6 +97,13 @@ const RULE_KEYWORDS = {
   oblique: ['斜角', 'dutch angle', '45°', '45度'],
 };
 
+const SCENE_CONSTRAINT_KEYWORDS = {
+  indoorStudio: ['室内', '棚拍', '摄影棚', 'studio', 'indoor', 'interior', 'room', 'apartment', 'office', 'classroom', '教室', '房间'],
+  explicitTime: ['夜晚', '夜景', '深夜', '夜色', '蓝调', '黄昏', '傍晚', '日出', '清晨', '黎明', '正午', '中午', '黄金时刻', 'golden hour', 'sunrise', 'dawn', 'midday', 'noon', 'night', 'nighttime', 'moonlight', 'twilight', 'dusk'],
+  explicitColorTemp: ['冷蓝', '暖黄', '金橙', '自然色温', 'cool blue', 'warm', 'amber', 'golden tone', 'neutral white balance'],
+  explicitLightQuality: ['硬光', '柔光', '中性光', 'hard light', 'soft light', 'diffused light'],
+};
+
 function normalizeToken(value) {
   return String(value || '')
     .trim()
@@ -244,13 +251,86 @@ export function mergeSceneRecommendations({ current, rule, ai }) {
   return merged;
 }
 
+function appendConstraintReason(originalReason, message) {
+  if (!message) return originalReason || '';
+  if (!originalReason) return message;
+  return `${originalReason}；${message}`;
+}
+
+function hasPromptKeyword(promptText, keywords) {
+  return includesAny(promptText, keywords);
+}
+
+/**
+ * Apply post-merge scene constraints based on prompt semantics.
+ * Returns recommendation payload + metadata for observability.
+ */
+export function applySceneRecommendationConstraints(prompt, recommendation) {
+  const text = String(prompt || '').toLowerCase();
+  const next = recommendation && typeof recommendation === 'object' ? { ...recommendation } : {};
+  const clearFields = [];
+  let sceneConstraintApplied = false;
+
+  const isIndoorStudio = hasPromptKeyword(text, SCENE_CONSTRAINT_KEYWORDS.indoorStudio);
+  const hasExplicitTime = hasPromptKeyword(text, SCENE_CONSTRAINT_KEYWORDS.explicitTime);
+  const hasExplicitColorTemp = hasPromptKeyword(text, SCENE_CONSTRAINT_KEYWORDS.explicitColorTemp);
+  const hasExplicitLightQuality = hasPromptKeyword(text, SCENE_CONSTRAINT_KEYWORDS.explicitLightQuality);
+
+  if (isIndoorStudio && !hasExplicitTime) {
+    if (next.timeOfDay) {
+      clearFields.push('timeOfDay');
+      delete next.timeOfDay;
+      sceneConstraintApplied = true;
+    }
+    if (!hasExplicitColorTemp && next.colorTemp) {
+      clearFields.push('colorTemp');
+      delete next.colorTemp;
+      sceneConstraintApplied = true;
+    }
+    if (!hasExplicitLightQuality && next.lightQuality) {
+      clearFields.push('lightQuality');
+      delete next.lightQuality;
+      sceneConstraintApplied = true;
+    }
+
+    if (sceneConstraintApplied) {
+      next.reason = appendConstraintReason(next.reason, '约束: 室内/棚拍且未显式时段，已禁用自动时段注入');
+    }
+  }
+
+  if (clearFields.length > 0) {
+    next.__clearFields = [...new Set(clearFields)];
+  }
+
+  return {
+    recommendation: next,
+    sceneConstraintApplied,
+    clearFields: next.__clearFields || [],
+    constraintMode: sceneConstraintApplied ? 'indoor_no_time' : 'none',
+  };
+}
+
 export function getSceneRecommendationDiff(current, next) {
   const diffs = [];
+  const clearFields = new Set(Array.isArray(next?.__clearFields) ? next.__clearFields : []);
+
+  for (const field of clearFields) {
+    if (current?.[field]) {
+      diffs.push({
+        field,
+        label: SCENE_RECO_LABELS[field] || field,
+        from: current[field],
+        to: '',
+        action: 'clear',
+      });
+    }
+  }
+
   for (const field of SCENE_RECO_FIELDS) {
     const from = current?.[field] || '';
     const to = next?.[field] || '';
     if (!to || from === to) continue;
-    diffs.push({ field, label: SCENE_RECO_LABELS[field], from, to });
+    diffs.push({ field, label: SCENE_RECO_LABELS[field], from, to, action: 'set' });
   }
   return diffs;
 }
@@ -264,6 +344,6 @@ export function formatSceneRecommendationDiffText(current, next) {
   if (diffs.length === 0) return '无关键差异';
   return diffs
     .slice(0, 4)
-    .map((item) => `${item.label}: ${item.to}`)
+    .map((item) => item.action === 'clear' ? `${item.label}: 清空` : `${item.label}: ${item.to}`)
     .join('，');
 }

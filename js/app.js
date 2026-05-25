@@ -10,8 +10,9 @@ import {
   buildAnalysisMessages,
   buildOptimizeMessages,
   buildLightingMessages,
+  buildLightingRetryMessages,
   parseAnalysisResponse,
-  parseLightingRecommendationResponse,
+  parseLightingRecommendationEnvelope,
 } from './prompt.js';
 import { initRadar, updateRadarValues, destroyRadar } from './radar.js';
 import { renderSliders, getSliderValues, resetSliders, setValues, registerManualChangeCallback, destroySliders } from './sliders.js';
@@ -42,6 +43,7 @@ import { initTheme } from './theme.js';
 import {
   inferSceneRecommendationFromPrompt,
   mergeSceneRecommendations,
+  applySceneRecommendationConstraints,
   hasSceneRecommendationDiff,
   formatSceneRecommendationDiffText,
 } from './scene-recommendation.js';
@@ -52,6 +54,11 @@ import {
   formatCompositionRecommendationDiffText,
 } from './composition-recommendation.js';
 import {
+  validateLightingRecommendation,
+  summarizeLightingValidation,
+  detectLightingKeyNamingMode,
+  classifySceneForLumens,
+  applyLumensSoftCaps,
   hasLightingRecommendationDiff,
   formatLightingRecommendationDiffText,
 } from './lighting-recommendation.js';
@@ -67,6 +74,7 @@ const state = {
   isAnalyzing: false,
   isOptimizing: false,
   abortController: null,
+  analyzeTelemetry: null,
 };
 
 /* ============ DOM Refs ============ */
@@ -277,34 +285,83 @@ async function handleAnalyze() {
 
     const currentSceneState = getSceneRecommendationState();
     const ruleSceneRecommendation = inferSceneRecommendationFromPrompt(prompt);
-    const finalSceneRecommendation = mergeSceneRecommendations({
+    const mergedSceneRecommendation = mergeSceneRecommendations({
       current: currentSceneState,
       rule: ruleSceneRecommendation,
       ai: result.sceneRecommendation || null,
     });
+    const sceneConstraintResult = applySceneRecommendationConstraints(prompt, mergedSceneRecommendation);
+    const finalSceneRecommendation = sceneConstraintResult.recommendation || {};
+    const sceneRecommendationForModel = sanitizeSceneRecommendationForModel(finalSceneRecommendation);
 
     let lightingRecommendation = null;
+    let lightingAuditMeta = {
+      round2RetryUsed: false,
+      keyNamingMode: 'unknown',
+      lumensCappedCount: 0,
+      lumensProfile: 'unknown',
+    };
+
     try {
       showLoading('正在分析提示词（2/2：灯光细化）...');
       const lightingMessages = buildLightingMessages(prompt, {
-        sceneRecommendation: finalSceneRecommendation,
+        sceneRecommendation: sceneRecommendationForModel,
         compositionRecommendation: finalCompositionRecommendation,
       });
-      let lightingText = '';
-      await streamChat(lightingMessages, {
-        onChunk: (chunk) => { lightingText += chunk; },
-        onDone: (text) => { lightingText = text; },
-        onError: (err) => { throw err; },
-        signal: state.abortController.signal,
-      });
-      lightingRecommendation = parseLightingRecommendationResponse(lightingText);
-      if (!lightingRecommendation) {
-        showToast('灯光细化建议未返回有效结构，已保留第一轮布光设置', 'info');
+
+      const firstRound = await requestLightingRound(lightingMessages, state.abortController.signal);
+      let candidate = firstRound.recommendation;
+      let validation = validateLightingRecommendation(candidate);
+      lightingAuditMeta.keyNamingMode = firstRound.keyNamingMode;
+
+      if (!validation.isValid || !validation.isComplete) {
+        lightingAuditMeta.round2RetryUsed = true;
+        showLoading('正在分析提示词（2/2：灯光纠错重试）...');
+
+        const retryMessages = buildLightingRetryMessages(
+          prompt,
+          {
+            sceneRecommendation: sceneRecommendationForModel,
+            compositionRecommendation: finalCompositionRecommendation,
+          },
+          summarizeLightingValidation(validation, firstRound.parseError)
+        );
+
+        const retryRound = await requestLightingRound(retryMessages, state.abortController.signal);
+        candidate = retryRound.recommendation;
+        validation = validateLightingRecommendation(candidate);
+
+        if (lightingAuditMeta.keyNamingMode === 'unknown') {
+          lightingAuditMeta.keyNamingMode = retryRound.keyNamingMode;
+        } else if (retryRound.keyNamingMode && retryRound.keyNamingMode !== 'unknown' && retryRound.keyNamingMode !== lightingAuditMeta.keyNamingMode) {
+          lightingAuditMeta.keyNamingMode = `${lightingAuditMeta.keyNamingMode}->${retryRound.keyNamingMode}`;
+        }
+      }
+
+      if (!validation.isValid || !validation.isComplete) {
+        lightingRecommendation = null;
+        showToast('灯光细化建议结构不完整，已保留第一轮布光设置', 'info');
+      } else {
+        const lumensProfile = classifySceneForLumens(prompt, finalSceneRecommendation);
+        const cappedResult = applyLumensSoftCaps(candidate, lumensProfile);
+        lightingRecommendation = cappedResult.recommendation;
+        lightingAuditMeta.lumensCappedCount = cappedResult.lumensCappedCount;
+        lightingAuditMeta.lumensProfile = cappedResult.profile;
+
+        if (cappedResult.lumensCappedCount > 0) {
+          showToast(`逐灯流明已按 ${lumensProfile} 档位校正 (${cappedResult.lumensCappedCount} 项)`, 'info');
+        }
       }
     } catch (round2Error) {
       showToast(`灯光细化阶段失败，已保留第一轮设置：${round2Error.message}`, 'info');
       lightingRecommendation = null;
     }
+
+    state.analyzeTelemetry = {
+      ...lightingAuditMeta,
+      sceneConstraintApplied: sceneConstraintResult.sceneConstraintApplied,
+      sceneConstraintMode: sceneConstraintResult.constraintMode,
+    };
 
     // Render presets
     if (state.presets.length > 0) {
@@ -493,6 +550,36 @@ function handleHistorySelect(record) {
     }
     showEl(els.resultSection);
   }
+}
+
+function sanitizeSceneRecommendationForModel(reco) {
+  if (!reco || typeof reco !== 'object') return {};
+  const next = {};
+  const allowed = ['timeOfDay', 'lightingPreset', 'colorTemp', 'lightQuality', 'cameraPreset', 'reason'];
+  for (const key of allowed) {
+    const value = reco[key];
+    if (typeof value === 'string' && value.trim()) {
+      next[key] = value.trim();
+    }
+  }
+  return next;
+}
+
+async function requestLightingRound(messages, signal) {
+  let fullText = '';
+  await streamChat(messages, {
+    onChunk: (chunk) => { fullText += chunk; },
+    onDone: (text) => { fullText = text; },
+    onError: () => {},
+    signal,
+  });
+
+  const envelope = parseLightingRecommendationEnvelope(fullText);
+  return {
+    recommendation: envelope.recommendation,
+    parseError: envelope.parseError,
+    keyNamingMode: detectLightingKeyNamingMode(envelope.raw),
+  };
 }
 
 /* ============ Recommendation Policy ============ */

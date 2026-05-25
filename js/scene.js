@@ -223,6 +223,22 @@ export function clearManualSceneChanges() {
 export function applySceneRecommendation(reco, { source = 'auto' } = {}) {
   if (!reco || typeof reco !== 'object') return false;
   let applied = false;
+  const clearFields = Array.isArray(reco.__clearFields) ? reco.__clearFields : [];
+
+  for (const field of clearFields) {
+    if (field === 'timeOfDay' && timeOfDay !== null) {
+      timeOfDay = null;
+      applied = true;
+    }
+    if (field === 'colorTemp' && colorTemp !== null) {
+      colorTemp = null;
+      applied = true;
+    }
+    if (field === 'lightQuality' && lightQuality !== null) {
+      lightQuality = null;
+      applied = true;
+    }
+  }
 
   if (SCENE_RECOMMENDATION_ENUMS.cameraPreset.includes(reco.cameraPreset)) {
     applyCameraPresetByName(reco.cameraPreset);
@@ -1125,4 +1141,3 @@ function normalizeToken(value) {
 function markManualSceneChange() {
   manualSceneChanged = true;
 }
-

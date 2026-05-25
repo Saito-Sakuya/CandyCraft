@@ -5,17 +5,28 @@ import {
   buildAnalysisMessages,
   buildOptimizeMessages,
   buildLightingMessages,
+  buildLightingRetryMessages,
   parseAnalysisResponse,
-  parseLightingRecommendationResponse,
+  parseLightingRecommendationEnvelope,
 } from '../../js/prompt.js';
-import { inferSceneRecommendationFromPrompt } from '../../js/scene-recommendation.js';
+import {
+  inferSceneRecommendationFromPrompt,
+  mergeSceneRecommendations,
+  applySceneRecommendationConstraints,
+} from '../../js/scene-recommendation.js';
 import {
   inferCompositionRecommendationFromPrompt,
   mergeCompositionRecommendations,
+  inferOrientationFromRatio,
 } from '../../js/composition-recommendation.js';
 import {
   LIGHT_TYPE_ENUMS,
   normalizeLightingRecommendation,
+  validateLightingRecommendation,
+  detectLightingKeyNamingMode,
+  classifySceneForLumens,
+  applyLumensSoftCaps,
+  summarizeLightingValidation,
 } from '../../js/lighting-recommendation.js';
 
 const CLARITY_RESULTS_PATH = path.resolve('audit/clarity/prompt-clarity-results.json');
@@ -29,7 +40,7 @@ const SAMPLES = [
   { id: 'S03', group: 'sunrise', prompt: '海边日出，少年在礁石上迎风而立，暖色逆光，广角全景' },
   { id: 'S04', group: 'golden', prompt: '黄金时刻的森林小径，情侣并肩散步，柔和光晕，浅景深' },
   { id: 'S05', group: 'noon', prompt: '正午城市天台，白衬衫人物俯视街道，硬朗阴影，写实摄影' },
-  { id: 'S06', group: 'portrait', prompt: '棚拍人像，伦勃朗布光，85mm，中景，肤色自然' },
+  { id: 'S06', group: 'indoor_no_time', prompt: '棚拍人像，伦勃朗布光，85mm，中景，肤色自然', expect: { indoorNoExplicitTime: true } },
   { id: 'S07', group: 'portrait', prompt: '时尚杂志封面女模，蝶形光，干净背景，特写镜头' },
   { id: 'S08', group: 'oblique', prompt: '废弃教室中的冲突对峙，45度斜角构图，压迫感强' },
   { id: 'S09', group: 'bird', prompt: '鸟瞰古镇夜市，人群密集，灯笼暖光与冷色天空对比' },
@@ -44,6 +55,7 @@ const SAMPLES = [
   { id: 'S18', group: 'detail', prompt: '极简主义客厅，白墙与木质家具，柔和自然光，安静氛围' },
   { id: 'S19', group: 'orientation', prompt: '电影海报竖版构图，角色居中，比例 2:3，低照度侧光' },
   { id: 'S20', group: 'orientation', prompt: '超宽银幕横版，比例 21:9，荒漠追车场景，强逆光' },
+  { id: 'S21', group: 'indoor_explicit_night', prompt: '夜晚室内双人对话，低照度电影感，窗外霓虹反射', expect: { indoorExplicitNight: true } },
 ];
 
 const DEFAULT_DIMENSIONS = [
@@ -60,11 +72,27 @@ const DEFAULT_ELEMENTS = [
   { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
 ];
 
+function sanitizeSceneRecommendationForModel(reco) {
+  if (!reco || typeof reco !== 'object') return {};
+  const next = {};
+  const allowed = ['timeOfDay', 'lightingPreset', 'colorTemp', 'lightQuality', 'cameraPreset', 'reason'];
+  for (const key of allowed) {
+    const value = reco[key];
+    if (typeof value === 'string' && value.trim()) {
+      next[key] = value.trim();
+    }
+  }
+  return next;
+}
+
 function makeSceneFromReco(reco) {
   const normalized = reco || {};
-  const timeOfDay = normalized.timeOfDay || '正午';
+  const timeOfDay = normalized.timeOfDay || null;
   const colorTempMap = { 夜晚: '冷蓝', 蓝调: '冷蓝', 日出: '暖黄', 黄金: '金橙', 正午: '自然' };
   const qualityMap = { 夜晚: '中性', 蓝调: '柔光', 日出: '柔光', 黄金: '柔光', 正午: '硬光' };
+
+  const colorTemp = normalized.colorTemp || (timeOfDay ? colorTempMap[timeOfDay] : null) || null;
+  const lightQuality = normalized.lightQuality || (timeOfDay ? qualityMap[timeOfDay] : null) || null;
 
   return {
     cameraPreset: normalized.cameraPreset || '平视 (eye-level shot)',
@@ -72,9 +100,9 @@ function makeSceneFromReco(reco) {
     framing: '中景 (medium shot (MS), waist up)',
     aperture: 'f/2.8',
     lightingPreset: normalized.lightingPreset || '自然光',
-    lightQuality: `${normalized.lightQuality || qualityMap[timeOfDay] || '中性'} (rule-based)`,
-    colorTemp: `${normalized.colorTemp || colorTempMap[timeOfDay] || '自然'} (rule-based)`,
-    timeOfDay: `${timeOfDay} (rule-based)`,
+    lightQuality: lightQuality ? `${lightQuality} (rule-based)` : null,
+    colorTemp: colorTemp ? `${colorTemp} (rule-based)` : null,
+    timeOfDay: timeOfDay ? `${timeOfDay} (rule-based)` : null,
     lights: {
       'light source 1': { alias: 'key', on: true, type: '聚光灯', typeEn: 'spotlight, hard directional light', watts: 500, lumens: 5000, subjectLumens: 2600 },
       'light source 2': { alias: 'fill', on: true, type: '柔光箱', typeEn: 'softbox, diffused soft light', watts: 220, lumens: 2200, subjectLumens: 1100 },
@@ -86,21 +114,12 @@ function makeSceneFromReco(reco) {
 
 function makeCompositionFromReco(compositionReco) {
   const ratio = compositionReco?.ratio || '16:9';
-  const orientation = compositionReco?.orientation || inferOrientationFromRatioText(ratio) || 'landscape';
+  const orientation = compositionReco?.orientation || inferOrientationFromRatio(ratio) || 'landscape';
   return {
     ratio,
     orientation,
     resolution: '2K',
   };
-}
-
-function inferOrientationFromRatioText(ratioText) {
-  const m = String(ratioText || '').match(/^(\d+):(\d+)$/);
-  if (!m) return null;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  if (w === h) return 'square';
-  return w > h ? 'landscape' : 'portrait';
 }
 
 function buildFallbackLightingRecommendation(scene) {
@@ -139,7 +158,105 @@ async function callChat(messages) {
   return response.json();
 }
 
-function collectIssues({ optimizeInput, optimizedPrompt, inferredReco, composition, lightingRecommendation }) {
+function parseLightingText(text) {
+  const envelope = parseLightingRecommendationEnvelope(text);
+  return {
+    recommendation: envelope.recommendation,
+    parseError: envelope.parseError,
+    keyNamingMode: detectLightingKeyNamingMode(envelope.raw),
+  };
+}
+
+async function analyzeLightingWithRetry(samplePrompt, context, modelEndpointAvailable) {
+  const emptyMeta = {
+    round2RetryUsed: false,
+    keyNamingMode: 'unknown',
+    lumensCappedCount: 0,
+    lumensProfile: 'unknown',
+  };
+
+  if (!modelEndpointAvailable) {
+    return {
+      recommendation: null,
+      meta: emptyMeta,
+      validation: { isValid: false, isComplete: false, missingKeys: ['key', 'fill', 'back', 'hair'], issues: ['endpoint_unavailable'] },
+      rawPreview: '',
+    };
+  }
+
+  const lightingMessages = buildLightingMessages(samplePrompt, context);
+  const firstJson = await callChat(lightingMessages);
+  const firstRawText = extractContentFromChatResponse(firstJson);
+  const firstRound = parseLightingText(firstRawText);
+  let candidate = firstRound.recommendation;
+  let validation = validateLightingRecommendation(candidate);
+  let keyNamingMode = firstRound.keyNamingMode;
+  let round2RetryUsed = false;
+  let lastRawPreview = firstRawText.slice(0, 240);
+
+  if (!validation.isValid || !validation.isComplete) {
+    round2RetryUsed = true;
+    const retryMessages = buildLightingRetryMessages(
+      samplePrompt,
+      context,
+      summarizeLightingValidation(validation, firstRound.parseError)
+    );
+    const retryJson = await callChat(retryMessages);
+    const retryRawText = extractContentFromChatResponse(retryJson);
+    const retryRound = parseLightingText(retryRawText);
+    candidate = retryRound.recommendation;
+    validation = validateLightingRecommendation(candidate);
+    lastRawPreview = retryRawText.slice(0, 240);
+
+    if (keyNamingMode === 'unknown') {
+      keyNamingMode = retryRound.keyNamingMode;
+    } else if (
+      retryRound.keyNamingMode &&
+      retryRound.keyNamingMode !== 'unknown' &&
+      retryRound.keyNamingMode !== keyNamingMode
+    ) {
+      keyNamingMode = `${keyNamingMode}->${retryRound.keyNamingMode}`;
+    }
+  }
+
+  if (!validation.isValid || !validation.isComplete) {
+    return {
+      recommendation: null,
+      meta: {
+        ...emptyMeta,
+        round2RetryUsed,
+        keyNamingMode,
+      },
+      validation,
+      rawPreview: lastRawPreview,
+    };
+  }
+
+  const lumensProfile = classifySceneForLumens(samplePrompt, context.sceneRecommendation || {});
+  const capped = applyLumensSoftCaps(candidate, lumensProfile);
+  return {
+    recommendation: capped.recommendation,
+    meta: {
+      round2RetryUsed,
+      keyNamingMode,
+      lumensCappedCount: capped.lumensCappedCount,
+      lumensProfile: capped.profile,
+    },
+    validation,
+    rawPreview: lastRawPreview,
+  };
+}
+
+function collectIssues({
+  sample,
+  optimizeInput,
+  optimizedPrompt,
+  sceneRecommendation,
+  composition,
+  lightingRecommendation,
+  lightingValidation,
+  telemetry,
+}) {
   const issues = [];
   const text = `${optimizeInput}\n${optimizedPrompt || ''}`.toLowerCase();
   const has = (patterns) => patterns.some((pattern) => text.includes(pattern));
@@ -184,7 +301,7 @@ function collectIssues({ optimizeInput, optimizedPrompt, inferredReco, compositi
   }
 
   const orientation = composition?.orientation || '';
-  const ratioOrientation = inferOrientationFromRatioText(composition?.ratio || '');
+  const ratioOrientation = inferOrientationFromRatio(composition?.ratio || '');
   if (orientation && ratioOrientation && orientation !== ratioOrientation) {
     issues.push({
       severity: 'high',
@@ -212,21 +329,20 @@ function collectIssues({ optimizeInput, optimizedPrompt, inferredReco, compositi
     });
   }
 
-  if (has(['hard light']) && has(['soft diffused light'])) {
-    issues.push({
-      severity: 'low',
-      code: 'light_quality_conflict',
-      message: '同段落出现硬光与柔光并列，可能导致引擎理解分散。',
-      suggestion: '明确主光光质，再对补光写“soft fill”作为次级条件。',
-    });
-  }
-
-  if (inferredReco?.timeOfDay === '夜晚' && has(['golden hour', 'sunrise'])) {
+  if (sample.expect?.indoorNoExplicitTime && sceneRecommendation?.timeOfDay) {
     issues.push({
       severity: 'high',
-      code: 'night_scene_drift',
-      message: '夜景样本漂移到晨昏时段表达。',
-      suggestion: '锁定夜晚关键词并禁止晨昏词汇进入最终提示词。',
+      code: 'indoor_time_drift',
+      message: `室内/棚拍无显式时段样本仍注入时段（${sceneRecommendation.timeOfDay}）。`,
+      suggestion: '室内且无显式时段时应清空 timeOfDay，并避免自动派生色温/光质。',
+    });
+  }
+  if (sample.expect?.indoorExplicitNight && sceneRecommendation?.timeOfDay !== '夜晚') {
+    issues.push({
+      severity: 'high',
+      code: 'explicit_time_lost',
+      message: `夜晚室内样本未保留显式时段（当前=${sceneRecommendation?.timeOfDay || '空'}）。`,
+      suggestion: '当提示词显式指定时段时，室内约束不应清空该字段。',
     });
   }
 
@@ -235,7 +351,7 @@ function collectIssues({ optimizeInput, optimizedPrompt, inferredReco, compositi
       severity: 'high',
       code: 'missing_lighting_recommendation',
       message: '第二轮逐灯建议缺失或结构非法。',
-      suggestion: '确保返回 lights.key/fill/back/hair 的 on/type/lumens。',
+      suggestion: '确保返回四灯建议，兼容 key/fill/back/hair 与 light1~4，并在失败时触发一次纠错重试。',
     });
     return issues;
   }
@@ -277,7 +393,324 @@ function collectIssues({ optimizeInput, optimizedPrompt, inferredReco, compositi
     }
   }
 
+  if (lightingValidation?.isValid === false && !telemetry.round2RetryUsed) {
+    issues.push({
+      severity: 'medium',
+      code: 'round2_retry_not_used',
+      message: '逐灯建议非法时未触发二轮重试。',
+      suggestion: '首次结果非法/缺字段时应自动重试 1 次。',
+    });
+  }
+
+  if (telemetry.keyNamingMode === 'unknown') {
+    issues.push({
+      severity: 'low',
+      code: 'key_naming_unknown',
+      message: '无法识别二轮灯光键名模式（unknown）。',
+      suggestion: '优先要求 light1~4，解析层继续兼容 legacy 键。',
+    });
+  }
+
   return issues;
+}
+
+function makeTelemetry(meta = {}, sceneConstraintResult = {}, keyNamingModeFallback = 'unknown') {
+  return {
+    round2RetryUsed: Boolean(meta.round2RetryUsed),
+    keyNamingMode: meta.keyNamingMode || keyNamingModeFallback,
+    lumensCappedCount: Number(meta.lumensCappedCount || 0),
+    lumensProfile: meta.lumensProfile || 'unknown',
+    sceneConstraintApplied: Boolean(sceneConstraintResult.sceneConstraintApplied),
+    sceneConstraintMode: sceneConstraintResult.constraintMode || 'none',
+  };
+}
+
+async function runSample(sample, modelEndpointAvailable) {
+  const ruleSceneRecommendation = inferSceneRecommendationFromPrompt(sample.prompt);
+  const ruleCompositionRecommendation = inferCompositionRecommendationFromPrompt(sample.prompt);
+  const analysisMessages = buildAnalysisMessages(sample.prompt, 6);
+
+  let analysisParsed = null;
+  let analysisRaw = '';
+  if (modelEndpointAvailable) {
+    try {
+      const json = await callChat(analysisMessages);
+      analysisRaw = extractContentFromChatResponse(json);
+      analysisParsed = parseAnalysisResponse(analysisRaw);
+    } catch {
+      analysisParsed = null;
+    }
+  }
+
+  const dimensions = analysisParsed?.dimensions?.length ? analysisParsed.dimensions : DEFAULT_DIMENSIONS;
+
+  const mergedSceneRecommendation = mergeSceneRecommendations({
+    current: {},
+    rule: ruleSceneRecommendation,
+    ai: analysisParsed?.sceneRecommendation || null,
+  });
+  const sceneConstraintResult = applySceneRecommendationConstraints(sample.prompt, mergedSceneRecommendation);
+  const finalSceneRecommendation = sceneConstraintResult.recommendation || {};
+
+  const compositionReco = mergeCompositionRecommendations({
+    current: { ratio: '16:9', orientation: 'landscape' },
+    rule: ruleCompositionRecommendation,
+    ai: analysisParsed?.compositionRecommendation || null,
+  });
+
+  const composition = makeCompositionFromReco(compositionReco);
+  const scene = makeSceneFromReco(finalSceneRecommendation);
+
+  const optimizeMessages = buildOptimizeMessages(sample.prompt, {
+    dimensions,
+    composition,
+    elements: DEFAULT_ELEMENTS,
+    links: [],
+    scene,
+    style: 6,
+  });
+  const optimizeInput = optimizeMessages[1]?.content || '';
+
+  let optimizedPrompt = '';
+  let optimizeModelError = '';
+  if (modelEndpointAvailable) {
+    try {
+      const json = await callChat(optimizeMessages);
+      optimizedPrompt = extractContentFromChatResponse(json);
+    } catch (error) {
+      optimizeModelError = error?.message || String(error);
+    }
+  }
+
+  let lightingRecommendation = buildFallbackLightingRecommendation(scene);
+  let lightingValidation = validateLightingRecommendation(lightingRecommendation);
+  let lightingRawPreview = '';
+  let lightingMeta = {
+    round2RetryUsed: false,
+    keyNamingMode: 'fallback',
+    lumensCappedCount: 0,
+    lumensProfile: 'unknown',
+  };
+  if (modelEndpointAvailable) {
+    try {
+      const lightingResult = await analyzeLightingWithRetry(
+        sample.prompt,
+        {
+          sceneRecommendation: sanitizeSceneRecommendationForModel(finalSceneRecommendation),
+          compositionRecommendation: compositionReco || null,
+        },
+        modelEndpointAvailable
+      );
+      lightingRawPreview = lightingResult.rawPreview;
+      lightingValidation = lightingResult.validation;
+      lightingMeta = lightingResult.meta;
+      if (lightingResult.recommendation) {
+        lightingRecommendation = lightingResult.recommendation;
+      }
+    } catch {
+      lightingMeta = {
+        round2RetryUsed: false,
+        keyNamingMode: 'error',
+        lumensCappedCount: 0,
+        lumensProfile: 'unknown',
+      };
+    }
+  }
+
+  const telemetry = makeTelemetry(lightingMeta, sceneConstraintResult, lightingMeta.keyNamingMode);
+  const issues = collectIssues({
+    sample,
+    optimizeInput,
+    optimizedPrompt,
+    sceneRecommendation: finalSceneRecommendation,
+    composition,
+    lightingRecommendation,
+    lightingValidation,
+    telemetry,
+  });
+
+  return {
+    id: sample.id,
+    group: sample.group,
+    prompt: sample.prompt,
+    modelEndpointAvailable,
+    analysisRawPreview: analysisRaw.slice(0, 220),
+    sceneRecommendation: finalSceneRecommendation,
+    compositionRecommendation: compositionReco || null,
+    lightingRecommendation,
+    lightingValidation,
+    telemetry,
+    issues,
+    status: issues.length ? 'fail' : 'pass',
+    optimizeModelError,
+    optimizePreview: optimizedPrompt ? optimizedPrompt.slice(0, 220) : '',
+    optimizeInputPreview: optimizeInput.slice(0, 220),
+    lightingRawPreview,
+  };
+}
+
+function runSyntheticChecks() {
+  const checks = [];
+
+  {
+    const id = 'X01';
+    const prompt = '室内棚拍肖像，低照度，电影感，半身构图';
+    const merged = mergeSceneRecommendations({
+      current: {},
+      rule: inferSceneRecommendationFromPrompt(prompt),
+      ai: null,
+    });
+    const sceneConstraintResult = applySceneRecommendationConstraints(prompt, merged);
+    const sceneRecommendation = sceneConstraintResult.recommendation || {};
+
+    const firstRaw = {
+      lights: {
+        key: { on: true, type: '聚光灯', lumens: 5200 },
+        fill: { on: true, type: '柔光箱', lumens: 2600 },
+      },
+      reason: 'legacy_partial',
+    };
+    const retryRaw = {
+      lights: {
+        light1: { on: true, type: '聚光灯', lumens: 5200 },
+        light2: { on: true, type: '柔光箱', lumens: 2600 },
+        light3: { on: true, type: '发灯', lumens: 1900 },
+        light4: { on: false, type: '发灯', lumens: 1000 },
+      },
+      reason: 'retry_fixed',
+    };
+
+    const firstReco = normalizeLightingRecommendation(firstRaw);
+    const firstValidation = validateLightingRecommendation(firstReco);
+    const retryUsed = !firstValidation.isValid || !firstValidation.isComplete;
+    const finalReco = normalizeLightingRecommendation(retryRaw);
+    const finalValidation = validateLightingRecommendation(finalReco);
+    const profile = classifySceneForLumens(prompt, sceneRecommendation);
+    const capped = applyLumensSoftCaps(finalReco, profile);
+
+    const telemetry = makeTelemetry(
+      {
+        round2RetryUsed: retryUsed,
+        keyNamingMode: `${detectLightingKeyNamingMode(firstRaw)}->${detectLightingKeyNamingMode(retryRaw)}`,
+        lumensCappedCount: capped.lumensCappedCount,
+        lumensProfile: capped.profile,
+      },
+      sceneConstraintResult,
+      'legacy->light1_4'
+    );
+
+    const issues = [];
+    if (!retryUsed) {
+      issues.push({
+        severity: 'high',
+        code: 'synthetic_retry_missing',
+        message: '旧命名缺字段样本未触发重试。',
+        suggestion: '校正 validation 判定，非法或不完整时必须进行一次重试。',
+      });
+    }
+    if (!finalValidation.isValid || !finalValidation.isComplete) {
+      issues.push({
+        severity: 'high',
+        code: 'synthetic_retry_still_invalid',
+        message: '重试后结构仍非法。',
+        suggestion: '重试提示词必须强约束 schema，仅允许 light1~4。',
+      });
+    }
+
+    checks.push({
+      id,
+      group: 'synthetic_retry',
+      prompt,
+      modelEndpointAvailable: false,
+      synthetic: true,
+      sceneRecommendation,
+      compositionRecommendation: null,
+      lightingRecommendation: capped.recommendation,
+      lightingValidation: finalValidation,
+      telemetry,
+      issues,
+      status: issues.length ? 'fail' : 'pass',
+      optimizeModelError: '',
+      optimizePreview: '',
+      optimizeInputPreview: '',
+      lightingRawPreview: JSON.stringify(retryRaw).slice(0, 220),
+    });
+  }
+
+  {
+    const id = 'X02';
+    const prompt = '棚拍时尚大片，室内静态人像，背景纯色';
+    const merged = mergeSceneRecommendations({
+      current: {},
+      rule: inferSceneRecommendationFromPrompt(prompt),
+      ai: null,
+    });
+    const sceneConstraintResult = applySceneRecommendationConstraints(prompt, merged);
+    const sceneRecommendation = sceneConstraintResult.recommendation || {};
+    const raw = {
+      lights: {
+        light1: { on: true, type: '聚光灯', lumens: 80000 },
+        light2: { on: true, type: '柔光箱', lumens: 45000 },
+        light3: { on: true, type: '发灯', lumens: 26000 },
+        light4: { on: true, type: '发灯', lumens: 9000 },
+      },
+      reason: 'overshoot_case',
+    };
+    const reco = normalizeLightingRecommendation(raw);
+    const validation = validateLightingRecommendation(reco);
+    const profile = classifySceneForLumens(prompt, sceneRecommendation);
+    const capped = applyLumensSoftCaps(reco, profile);
+
+    const telemetry = makeTelemetry(
+      {
+        round2RetryUsed: false,
+        keyNamingMode: detectLightingKeyNamingMode(raw),
+        lumensCappedCount: capped.lumensCappedCount,
+        lumensProfile: capped.profile,
+      },
+      sceneConstraintResult,
+      'light1_4'
+    );
+
+    const issues = [];
+    if (!validation.isValid || !validation.isComplete) {
+      issues.push({
+        severity: 'high',
+        code: 'synthetic_input_invalid',
+        message: '流明压顶样本在压顶前已非法。',
+        suggestion: '请先确保输入结构合法，再验证分档校正逻辑。',
+      });
+    }
+    if (capped.lumensCappedCount === 0) {
+      issues.push({
+        severity: 'high',
+        code: 'synthetic_cap_not_applied',
+        message: '超流明样本未触发分档软上限。',
+        suggestion: '按场景档位对 key/fill/back/hair 执行逐项 soft cap。',
+      });
+    }
+
+    checks.push({
+      id,
+      group: 'synthetic_lumens_cap',
+      prompt,
+      modelEndpointAvailable: false,
+      synthetic: true,
+      sceneRecommendation,
+      compositionRecommendation: null,
+      lightingRecommendation: capped.recommendation,
+      lightingValidation: validation,
+      telemetry,
+      issues,
+      status: issues.length ? 'fail' : 'pass',
+      optimizeModelError: '',
+      optimizePreview: '',
+      optimizeInputPreview: '',
+      lightingRawPreview: JSON.stringify(raw).slice(0, 220),
+    });
+  }
+
+  return checks;
 }
 
 async function runLocalClarityAudit() {
@@ -293,92 +726,12 @@ async function runLocalClarityAudit() {
 
   const results = [];
   for (const sample of SAMPLES) {
-    const inferredReco = inferSceneRecommendationFromPrompt(sample.prompt);
-    const ruleCompositionRecommendation = inferCompositionRecommendationFromPrompt(sample.prompt);
-    const analysisMessages = buildAnalysisMessages(sample.prompt, 6);
-
-    let analysisParsed = null;
-    let analysisRaw = '';
-    if (modelEndpointAvailable) {
-      try {
-        const json = await callChat(analysisMessages);
-        analysisRaw = extractContentFromChatResponse(json);
-        analysisParsed = parseAnalysisResponse(analysisRaw);
-      } catch {
-        analysisParsed = null;
-      }
-    }
-
-    const dimensions = analysisParsed?.dimensions?.length ? analysisParsed.dimensions : DEFAULT_DIMENSIONS;
-    const aiCompositionRecommendation = analysisParsed?.compositionRecommendation || null;
-    const compositionReco = mergeCompositionRecommendations({
-      current: { ratio: '16:9', orientation: 'landscape' },
-      rule: ruleCompositionRecommendation,
-      ai: aiCompositionRecommendation,
-    });
-    const composition = makeCompositionFromReco(compositionReco);
-    const scene = makeSceneFromReco(inferredReco);
-
-    const optimizeMessages = buildOptimizeMessages(sample.prompt, {
-      dimensions,
-      composition,
-      elements: DEFAULT_ELEMENTS,
-      links: [],
-      scene,
-      style: 6,
-    });
-
-    const optimizeInput = optimizeMessages[1]?.content || '';
-    let optimizedPrompt = '';
-    let optimizeModelError = '';
-    let lightingRecommendation = buildFallbackLightingRecommendation(scene);
-
-    if (modelEndpointAvailable) {
-      try {
-        const json = await callChat(optimizeMessages);
-        optimizedPrompt = extractContentFromChatResponse(json);
-      } catch (error) {
-        optimizeModelError = error?.message || String(error);
-      }
-
-      try {
-        const lightingMessages = buildLightingMessages(sample.prompt, {
-          sceneRecommendation: inferredReco || null,
-          compositionRecommendation: compositionReco || null,
-        });
-        const json = await callChat(lightingMessages);
-        const lightingRaw = extractContentFromChatResponse(json);
-        const parsedLighting = parseLightingRecommendationResponse(lightingRaw);
-        if (parsedLighting) {
-          lightingRecommendation = parsedLighting;
-        }
-      } catch {
-        // keep fallback recommendation
-      }
-    }
-
-    const issues = collectIssues({
-      optimizeInput,
-      optimizedPrompt,
-      inferredReco,
-      composition,
-      lightingRecommendation,
-    });
-    results.push({
-      id: sample.id,
-      group: sample.group,
-      prompt: sample.prompt,
-      modelEndpointAvailable,
-      inferredReco: inferredReco || null,
-      compositionRecommendation: compositionReco || null,
-      lightingRecommendation,
-      issues,
-      status: issues.length ? 'fail' : 'pass',
-      optimizeModelError,
-      optimizePreview: optimizedPrompt ? optimizedPrompt.slice(0, 220) : '',
-      optimizeInputPreview: optimizeInput.slice(0, 220),
-    });
+    const result = await runSample(sample, modelEndpointAvailable);
+    results.push(result);
   }
+
+  const syntheticResults = runSyntheticChecks();
+  results.push(...syntheticResults);
 
   const passCount = results.filter((item) => item.status === 'pass').length;
   const failCount = results.length - passCount;
@@ -410,16 +763,19 @@ function buildMarkdownReport(summary) {
     `- Fail: ${summary.totals.fail}`,
     `- Pass rate: ${(summary.totals.passRate * 100).toFixed(1)}%`,
     '',
-    '| ID | Group | Status | Issue count | Key note |',
-    '|---|---|---|---:|---|',
+    '| ID | Group | Status | Issues | Retry | Key naming | Cap count | Scene constraint | Key note |',
+    '|---|---|---|---:|---|---|---:|---|---|',
     ...summary.results.map((item) => {
       const note = item.issues[0]?.message || '无明显歧义';
-      return `| ${item.id} | ${item.group} | ${item.status.toUpperCase()} | ${item.issues.length} | ${note} |`;
+      const t = item.telemetry || {};
+      return `| ${item.id} | ${item.group} | ${item.status.toUpperCase()} | ${item.issues.length} | ${t.round2RetryUsed ? 'yes' : 'no'} | ${t.keyNamingMode || 'unknown'} | ${t.lumensCappedCount || 0} | ${t.sceneConstraintApplied ? 'yes' : 'no'} | ${note} |`;
     }),
     '',
     '## Detailed Issues',
     ...summary.results.flatMap((item) => {
-      if (!item.issues.length) return [`- ${item.id}: PASS`];
+      if (!item.issues.length) {
+        return [`- ${item.id}: PASS (retry=${item.telemetry?.round2RetryUsed ? 'yes' : 'no'}, keyMode=${item.telemetry?.keyNamingMode || 'unknown'}, capped=${item.telemetry?.lumensCappedCount || 0})`];
+      }
       const issueText = item.issues
         .map((issue) => `${issue.severity}/${issue.code}: ${issue.message} -> ${issue.suggestion}`)
         .join(' ; ');
@@ -429,7 +785,6 @@ function buildMarkdownReport(summary) {
     '## L2 Real Image Check',
     '- This run only auto-generates image check file when both `BFL_API_KEY` and `STABILITY_API_KEY` are present.',
   ];
-
   return lines.filter((line, idx, arr) => !(line === '' && arr[idx - 1] === '')).join('\n');
 }
 
