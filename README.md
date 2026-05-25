@@ -2,6 +2,9 @@
 
 > AI 驱动的可视化生图提示词优化工具
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Deployable on Cloudflare Pages](https://img.shields.io/badge/Deployable-Cloudflare%20Pages-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/pages/)
+
 ---
 
 ## 目录
