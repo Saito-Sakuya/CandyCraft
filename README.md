@@ -1,4 +1,4 @@
-# Candy Craft 🍬
+# Candy Craft
 
 > AI 驱动的可视化生图提示词优化工具
 
