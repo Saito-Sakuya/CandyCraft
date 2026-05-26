@@ -2,13 +2,42 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright';
+import { onRequest as orchestrateOnRequest } from '../../functions/api/analyze-orchestrate.js';
 
 const BASE_URL = process.env.SMOKE_BASE_URL || 'http://127.0.0.1:8788';
 const REPORT_PATH = path.resolve('audit/smoke/browser-smoke-report.md');
+const SMOKE_PROFILE = (process.env.SMOKE_PROFILE || 'full').trim().toLowerCase();
+const SMOKE_STEP_FILTER = process.env.SMOKE_STEP_FILTER ? new RegExp(process.env.SMOKE_STEP_FILTER, 'i') : null;
+const ANALYSIS_ORDERED_FIELDS = [
+  'schemaVersion',
+  'orderedFields',
+  'dimensions',
+  'elements',
+  'presets',
+  'sceneRecommendation',
+  'compositionRecommendation',
+];
 
 const results = [];
 
+function shouldRunStep(name) {
+  if (name === 'Load app shell') return true;
+  if (SMOKE_STEP_FILTER && !SMOKE_STEP_FILTER.test(name)) return false;
+  if (SMOKE_PROFILE === 'full') return true;
+  const profileMatchers = {
+    fast: /Load app shell|Managed mode request|Managed analyze|Poster entry|Poster mode can enter|Poster floating|Exit poster mode|Optimize request|Mobile poster/i,
+    poster: /Poster|poster|Mobile poster/i,
+    mobile: /Mobile/i,
+    scene: /Scene|Three\.js|Light|Camera|Coverage|Mobile portrait scene/i,
+    canvas: /Composition|Canvas|Alt\+click|Ctrl\+click/i,
+    api: /Managed|Optimize request|normal analyze|Load app shell/i,
+  };
+  const matcher = profileMatchers[SMOKE_PROFILE];
+  return matcher ? matcher.test(name) : true;
+}
+
 async function runStep(name, fn) {
+  if (!shouldRunStep(name)) return;
   const startedAt = Date.now();
   try {
     const detail = await fn();
@@ -41,6 +70,38 @@ async function closeSettingsIfOpen(page) {
   });
 }
 
+async function clearConfirmOverlay(page) {
+  const keepBtn = page.locator('#scene-confirm-keep');
+  const count = await keepBtn.count();
+  if (count > 0) {
+    const visible = await keepBtn.isVisible();
+    if (visible) {
+      await keepBtn.click();
+      await page.waitForTimeout(120);
+    }
+  }
+  await page.evaluate(() => {
+    document.getElementById('scene-confirm-overlay')?.classList.remove('open');
+  });
+}
+
+async function ensureNormalMode(page) {
+  const isPosterMode = await page.evaluate(() => document.body.classList.contains('poster-workspace-active'));
+  if (!isPosterMode) return;
+  const exitBtn = page.locator('#btn-exit-poster-workspace');
+  const exitCount = await exitBtn.count();
+  if (exitCount > 0 && await exitBtn.isVisible()) {
+    await exitBtn.click();
+    await page.waitForFunction(() => !document.body.classList.contains('poster-workspace-active'), null, { timeout: 4000 });
+    return;
+  }
+  const toggle = page.locator('#btn-poster-mode');
+  const count = await toggle.count();
+  if (count === 0) return;
+  await toggle.click();
+  await page.waitForFunction(() => !document.body.classList.contains('poster-workspace-active'), null, { timeout: 4000 });
+}
+
 function getSummary() {
   const passCount = results.filter((item) => item.status === 'pass').length;
   const failCount = results.length - passCount;
@@ -53,6 +114,8 @@ function buildReport() {
     '# Browser Smoke Report',
     '',
     `- Base URL: ${BASE_URL}`,
+    `- Profile: ${SMOKE_PROFILE}`,
+    `- Step filter: ${SMOKE_STEP_FILTER ? SMOKE_STEP_FILTER.source : 'none'}`,
     `- Timestamp: ${new Date().toISOString()}`,
     `- Result: ${failCount === 0 ? 'PASS' : 'FAIL'}`,
     `- Passed: ${passCount}/${results.length}`,
@@ -72,6 +135,41 @@ function buildReport() {
   return lines.join('\n');
 }
 
+async function waitForRequestJson(page, matcher, trigger, timeoutMs = 6000) {
+  return new Promise(async (resolve, reject) => {
+    let timer = null;
+    const onRequest = (request) => {
+      try {
+        if (!matcher(request)) return;
+        const payload = request.postDataJSON();
+        cleanup();
+        resolve(payload);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      page.off('request', onRequest);
+    };
+
+    page.on('request', onRequest);
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('request capture timeout'));
+    }, timeoutMs);
+
+    try {
+      await trigger();
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
 async function getCanvasGeometry(page, id) {
   return page.evaluate(async (elemId) => {
     const { getCanvasData } = await import('/js/canvas.js');
@@ -81,10 +179,282 @@ async function getCanvasGeometry(page, id) {
   }, id);
 }
 
+async function setCompositionRatio(page, value) {
+  const dropdownTrigger = page.locator('#composition-container .comp-ratio-dropdown .comp-dropdown-trigger');
+  if (await dropdownTrigger.count()) {
+    await dropdownTrigger.click();
+    const option = page.locator(`#composition-container .comp-ratio-dropdown .comp-dropdown-option[data-value="${value}"]`);
+    await option.waitFor({ state: 'visible', timeout: 3000 });
+    await option.click();
+    return;
+  }
+  await page.locator('#composition-container .comp-ratio-select').selectOption(value);
+}
+
+async function setCompositionLongEdge(page, value) {
+  const dropdownTrigger = page.locator('#composition-container .comp-long-edge-dropdown .comp-dropdown-trigger');
+  if (await dropdownTrigger.count()) {
+    await dropdownTrigger.click();
+    const option = page.locator(`#composition-container .comp-long-edge-dropdown .comp-dropdown-option[data-value="${value}"]`);
+    await option.waitFor({ state: 'visible', timeout: 3000 });
+    await option.click();
+    return;
+  }
+  await page.locator('#composition-container .comp-long-edge-select').selectOption(value);
+}
+
+async function getCanvasDisplayState(page) {
+  return page.evaluate(() => {
+    const board = document.getElementById('canvas-board');
+    if (!board) return null;
+    return {
+      sourceRatio: board.getAttribute('data-ratio'),
+      displayRatio: board.getAttribute('data-display-ratio'),
+      inlineAspectRatio: board.style.aspectRatio,
+      computedAspectRatio: window.getComputedStyle(board).aspectRatio,
+    };
+  });
+}
+
+function buildMockAnalysisContent() {
+  const dimensions = [
+    { name: '画面细节', description: '细节层次', min: 0, max: 100, default: 68, labels: ['简洁', '细腻'] },
+    { name: '光影层次', description: '明暗对比', min: 0, max: 100, default: 72, labels: ['平缓', '强烈'] },
+    { name: '色调氛围', description: '色彩取向', min: 0, max: 100, default: 66, labels: ['克制', '浓郁'] },
+    { name: '构图张力', description: '构图力度', min: 0, max: 100, default: 65, labels: ['稳定', '张力'] },
+    { name: '材质表现', description: '材质真实度', min: 0, max: 100, default: 61, labels: ['概括', '写实'] },
+    { name: '叙事深度', description: '叙事信息量', min: 0, max: 100, default: 58, labels: ['直给', '隐喻'] },
+    { name: '风格强度', description: '风格化程度', min: 0, max: 100, default: 70, labels: ['克制', '鲜明'] },
+    { name: '氛围渲染', description: '氛围表达', min: 0, max: 100, default: 64, labels: ['自然', '戏剧'] },
+  ];
+
+  const payload = {
+    schemaVersion: 'cc.analysis.v1',
+    orderedFields: ANALYSIS_ORDERED_FIELDS,
+    dimensions,
+    elements: [
+      {
+        id: 'elem_1',
+        type: 'character',
+        layer: 'foreground',
+        name: '主体',
+        description: '前景角色',
+        role: '主角',
+        position: { x: 50, y: 56 },
+        size: { w: 20, h: 32 },
+      },
+      {
+        id: 'elem_2',
+        type: 'object',
+        layer: 'background',
+        name: '背景',
+        description: '环境背景',
+        role: '背景景物',
+        position: { x: 50, y: 42 },
+        size: { w: 58, h: 40 },
+      },
+    ],
+    presets: [
+      {
+        name: '电影感',
+        description: '偏电影质感',
+        values: Object.fromEntries(dimensions.map((item) => [item.name, item.default])),
+      },
+    ],
+    sceneRecommendation: {
+      timeOfDay: '夜晚',
+      lightingPreset: '侧光',
+      colorTemp: '冷蓝',
+      lightQuality: '中性',
+      cameraPreset: '平视',
+      reason: '夜景样本',
+    },
+    compositionRecommendation: {
+      orientation: 'landscape',
+      ratio: '16:9',
+      reason: '横向叙事',
+    },
+  };
+  return JSON.stringify(payload);
+}
+
+function createMockEnvRoleRouting() {
+  return {
+    UPSTREAM_BASE_URL: 'https://fallback.example/v1',
+    UPSTREAM_API_KEY: 'fallback-key',
+    DEFAULT_MODEL: 'fallback-model',
+    STRUCTURE_BASE_URL: 'https://structure.example/v1',
+    STRUCTURE_API_KEY: 'structure-key',
+    STRUCTURE_MODEL: 'structure-model',
+    LIGHTING_BASE_URL: 'https://lighting.example/v1',
+    LIGHTING_API_KEY: 'lighting-key',
+    LIGHTING_MODEL: 'lighting-model',
+    NORMALIZE_BASE_URL: 'https://normalize.example/v1',
+    NORMALIZE_API_KEY: 'normalize-key',
+    NORMALIZE_MODEL: 'normalize-model',
+  };
+}
+
+function createMockOrchestrateMessages() {
+  return {
+    roles: {
+      structure: {
+        messages: [{ role: 'user', content: 'structure test' }],
+      },
+      lighting: {
+        messages: [{ role: 'user', content: 'lighting test' }],
+      },
+      normalize: {
+        messages: [{ role: 'user', content: 'normalize test' }],
+        context: {
+          composition: { ratio: '16:9', orientation: 'landscape', width: 1536, height: 864 },
+          scene: { timeOfDay: '夜晚' },
+          exactTexts: [],
+          negativePrompts: [],
+        },
+      },
+    },
+  };
+}
+
+async function validateOrchestrateRoleRouting() {
+  const calls = [];
+  const fallbackJson = JSON.stringify({ ok: true });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsedUrl = String(url);
+    const body = JSON.parse(String(init?.body || '{}'));
+    calls.push({
+      url: parsedUrl,
+      model: body.model,
+      auth: String(init?.headers?.Authorization || ''),
+      firstMessage: body?.messages?.[0]?.content || '',
+    });
+
+    let content = fallbackJson;
+    if (body?.messages?.[0]?.content === 'structure test') {
+      content = buildMockAnalysisContent();
+    } else if (body?.messages?.[0]?.content === 'lighting test') {
+      content = JSON.stringify({
+        schemaVersion: 'cc.lighting.v2',
+        orderedFields: ['schemaVersion', 'orderedFields', 'lights', 'reason'],
+        lights: {
+          light1: { on: true, type: '聚光灯', lumens: 5000 },
+          light2: { on: true, type: '柔光箱', lumens: 2200 },
+          light3: { on: true, type: '发灯', lumens: 1800 },
+          light4: { on: false, type: '发灯', lumens: 1000 },
+        },
+        reason: 'mock-lighting',
+      });
+    } else if (body?.messages?.[0]?.content === 'normalize test') {
+      content = JSON.stringify({
+        schemaVersion: 'cc.optimize.v1',
+        orderedFields: ['schemaVersion', 'orderedFields', 'blocks', 'finalPrompt', 'checks'],
+        blocks: {
+          subject: 'A person near storefront',
+          composition: '16:9 landscape, final canvas size 1536x864 px, --ar 16:9',
+          foreground: 'Main person foreground',
+          background: 'Clean storefront background',
+          camera: 'eye-level camera',
+          lighting: 'soft cinematic lighting',
+          style: 'semi-realistic',
+          exactText: 'none',
+          negativeConstraints: 'Avoid: none',
+          renderConstraints: 'clean prompt',
+        },
+        finalPrompt: 'A person near storefront, clean storefront background, 16:9 landscape, final canvas size 1536x864 px, eye-level camera, soft cinematic lighting, semi-realistic, Avoid: none, --ar 16:9',
+        checks: {
+          ratio: '16:9',
+          orientation: 'landscape',
+          finalSize: '1536x864',
+          containsSingleAr: true,
+          exactTextProtected: true,
+          negativeConstraintsPreserved: true,
+        },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      choices: [{ message: { content } }],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    const request = new Request('http://127.0.0.1/api/analyze-orchestrate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(createMockOrchestrateMessages()),
+    });
+    const response = await orchestrateOnRequest({
+      request,
+      env: createMockEnvRoleRouting(),
+    });
+    const json = await response.json();
+    if (response.status !== 200) {
+      throw new Error(`orchestrate status=${response.status}`);
+    }
+
+    const roleSource = json?.orchestration?.roleConfigSource || {};
+    if (roleSource.structure !== 'role' || roleSource.lighting !== 'role' || roleSource.normalize !== 'role') {
+      throw new Error(`roleConfigSource mismatch: ${JSON.stringify(roleSource)}`);
+    }
+
+    const routeMatrix = {
+      structure: calls.find((item) => item.firstMessage === 'structure test'),
+      lighting: calls.find((item) => item.firstMessage === 'lighting test'),
+      normalize: calls.find((item) => item.firstMessage === 'normalize test'),
+    };
+    if (!routeMatrix.structure || !routeMatrix.lighting || !routeMatrix.normalize) {
+      throw new Error(`missing role call(s): ${JSON.stringify(calls)}`);
+    }
+
+    const assertRole = (role, expected) => {
+      const got = routeMatrix[role];
+      if (!got.url.startsWith(expected.baseUrl)) {
+        throw new Error(`${role} baseUrl mismatch: ${got.url}`);
+      }
+      if (got.model !== expected.model) {
+        throw new Error(`${role} model mismatch: ${got.model}`);
+      }
+      if (got.auth !== `Bearer ${expected.apiKey}`) {
+        throw new Error(`${role} apiKey mismatch`);
+      }
+    };
+    assertRole('structure', { baseUrl: 'https://structure.example/v1', model: 'structure-model', apiKey: 'structure-key' });
+    assertRole('lighting', { baseUrl: 'https://lighting.example/v1', model: 'lighting-model', apiKey: 'lighting-key' });
+    assertRole('normalize', { baseUrl: 'https://normalize.example/v1', model: 'normalize-model', apiKey: 'normalize-key' });
+
+    return 'structure/lighting/normalize route to role-specific env config';
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
+  let mobileContext = null;
+  let mobilePage = null;
+
+  async function getMobilePage() {
+    if (!mobileContext) {
+      mobileContext = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        userAgent:
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 3,
+      });
+      mobilePage = await mobileContext.newPage();
+    }
+    await mobilePage.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    return mobilePage;
+  }
 
   await runStep('Load app shell', async () => {
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -104,24 +474,17 @@ async function main() {
   });
 
   await runStep('Managed mode request omits model field', async () => {
-    let capturedBody = null;
-    const onRequest = (request) => {
-      if (request.url().endsWith('/api/chat') && request.method() === 'POST') {
-        try {
-          capturedBody = request.postDataJSON();
-        } catch {
-          capturedBody = null;
-        }
-      }
-    };
-
-    page.on('request', onRequest);
     await page.click('#btn-settings');
     await page.check('input[name="api-mode"][value="managed"]');
-    await page.click('#test-connection');
-    await page.waitForTimeout(1200);
+    const capturedBody = await waitForRequestJson(
+      page,
+      (request) => request.url().endsWith('/api/chat') && request.method() === 'POST',
+      async () => {
+        await page.click('#test-connection');
+      },
+      8000,
+    );
     await closeSettingsIfOpen(page);
-    page.off('request', onRequest);
 
     if (!capturedBody || !Array.isArray(capturedBody.messages)) {
       throw new Error('failed to capture /api/chat request body');
@@ -132,7 +495,609 @@ async function main() {
     return 'captured /api/chat body without model';
   });
 
+  await runStep('Managed analyze uses /api/analyze-orchestrate with role payload', async () => {
+    let capturedBody = null;
+    const mockStructure = buildMockAnalysisContent();
+    const mockLighting = JSON.stringify({
+      lights: {
+        light1: { on: true, type: '聚光灯', lumens: 5000 },
+        light2: { on: true, type: '柔光箱', lumens: 2200 },
+        light3: { on: true, type: '发灯', lumens: 1800 },
+        light4: { on: false, type: '发灯', lumens: 1000 },
+      },
+      reason: 'smoke_stub',
+    });
+
+    await page.route('**/api/analyze-orchestrate', async (route, request) => {
+      capturedBody = request.postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          orchestration: {
+            path: ['structure', 'lighting', 'normalize'],
+            roleStatus: {
+              structure: { status: 'ok', detail: '' },
+              lighting: { status: 'ok', detail: '' },
+              normalize: { status: 'ok', detail: 'local_contract_check' },
+            },
+            fallbackUsed: false,
+          },
+          outputs: {
+            structure: { content: mockStructure },
+            lighting: { content: mockLighting },
+            lightingRetry: { used: false, content: '' },
+          },
+        }),
+      });
+    });
+
+    await page.fill('#prompt-input', '雨夜街头霓虹，低机位电影感');
+    await page.click('#btn-analyze');
+    await page.waitForSelector('#scene-section', { timeout: 12000 });
+    await page.unroute('**/api/analyze-orchestrate');
+
+    const roles = capturedBody?.roles || {};
+    if (!Array.isArray(roles?.structure?.messages) || roles.structure.messages.length === 0) {
+      throw new Error('missing roles.structure.messages in orchestrate payload');
+    }
+    if (!Array.isArray(roles?.lighting?.messages) || roles.lighting.messages.length === 0) {
+      throw new Error('missing roles.lighting.messages in orchestrate payload');
+    }
+    return `structure=${roles.structure.messages.length}, lighting=${roles.lighting.messages.length}`;
+  });
+
+  await runStep('Managed orchestrate routes backend roles to role-specific env', async () => {
+    return validateOrchestrateRoleRouting();
+  });
+
+  await runStep('P0 slider tool actions are present', async () => {
+    await page.evaluate(() => {
+      document.getElementById('sliders-section')?.style.setProperty('display', '');
+    });
+    const ids = [
+      '#btn-refresh-presets',
+      '#btn-refresh-dimensions',
+      '#btn-iterate-analysis',
+      '#btn-replace-dimension',
+    ];
+    const missing = [];
+    for (const selector of ids) {
+      const count = await page.locator(selector).count();
+      if (count === 0) missing.push(selector);
+    }
+    if (missing.length > 0) {
+      throw new Error(`missing slider tools: ${missing.join(', ')}`);
+    }
+    return '4 action buttons found';
+  });
+
+  await runStep('Poster entry card is standalone on homepage', async () => {
+    const inEntryCard = await page.locator('#poster-entry-card #btn-poster-mode').count();
+    if (inEntryCard !== 1) {
+      throw new Error('poster mode button should be inside standalone poster entry card');
+    }
+
+    const promptCardHasPosterButton = await page.evaluate(() => {
+      const prompt = document.getElementById('prompt-input');
+      const promptCard = prompt ? prompt.closest('.card') : null;
+      return Boolean(promptCard?.querySelector('#btn-poster-mode'));
+    });
+    if (promptCardHasPosterButton) {
+      throw new Error('prompt card should not contain poster mode button');
+    }
+    return 'standalone poster entry card confirmed';
+  });
+
+  await runStep('Poster mode can enter without prompt and reuse composition size system', async () => {
+    let entered = false;
+    try {
+      await page.fill('#prompt-input', '');
+      await page.click('#btn-poster-mode');
+      await page.waitForFunction(() => document.body.classList.contains('poster-workspace-active'), null, { timeout: 5000 });
+      entered = true;
+      await page.waitForSelector('#canvas-section', { timeout: 5000 });
+      await page.waitForSelector('#scene-section', { timeout: 5000, state: 'attached' });
+
+      const workspaceState = await page.evaluate(() => {
+        const bodyClass = document.body.classList.contains('poster-workspace-active');
+        const panelInputDisplay = window.getComputedStyle(document.querySelector('.panel-input')).display;
+        const panelOutputDisplay = window.getComputedStyle(document.querySelector('.panel-output')).display;
+        const inspectorVisible = !document.getElementById('poster-inspector')?.classList.contains('hidden');
+        const groupCount = document.querySelectorAll('#poster-inspector .poster-group').length;
+        const workflowPrompt = document.querySelector('#poster-slot-workflow #prompt-input') !== null;
+        const workflowOptimize = document.querySelector('#poster-slot-workflow #btn-optimize') !== null;
+        const workflowIterate = document.querySelector('#poster-slot-workflow #btn-iterate-analysis') !== null;
+        const compositionMoved = document.querySelector('#poster-slot-composition #composition-container') !== null;
+        const rightHasScene = document.querySelector('#poster-slot-scene, .poster-group-scene') !== null;
+        const rightHasDimensions = document.querySelector('#poster-slot-dimensions, .poster-group-dimensions') !== null;
+        const floatingToolsVisible = window.getComputedStyle(document.getElementById('poster-floating-tools')).display !== 'none';
+        const floatingSceneMounted = document.querySelector('#poster-slot-floating-scene #scene-section') !== null;
+        const floatingSlidersMounted = document.querySelector('#poster-slot-floating-dimensions-controls #sliders-section') !== null;
+        const floatingRadarMounted = document.querySelector('#poster-slot-floating-dimensions-radar #radar-section') !== null;
+        const boardRect = document.getElementById('canvas-board')?.getBoundingClientRect();
+        const layerRect = document.getElementById('layer-panel')?.getBoundingClientRect();
+        const inspectorRect = document.getElementById('poster-inspector')?.getBoundingClientRect();
+        const canvasSection = document.getElementById('canvas-section');
+        const noBoardLayerOverlap = boardRect && layerRect ? boardRect.right <= layerRect.left : false;
+        const noLayerInspectorOverlap = layerRect && inspectorRect ? layerRect.right <= inspectorRect.left : false;
+        const noCanvasHorizontalOverflow = canvasSection ? canvasSection.scrollWidth <= canvasSection.clientWidth + 2 : false;
+        return {
+          bodyClass,
+          panelInputDisplay,
+          panelOutputDisplay,
+          inspectorVisible,
+          groupCount,
+          workflowPrompt,
+          workflowOptimize,
+          workflowIterate,
+          compositionMoved,
+          rightHasScene,
+          rightHasDimensions,
+          floatingToolsVisible,
+          floatingSceneMounted,
+          floatingSlidersMounted,
+          floatingRadarMounted,
+          noBoardLayerOverlap,
+          noLayerInspectorOverlap,
+          noCanvasHorizontalOverflow,
+        };
+      });
+      if (!workspaceState.bodyClass || workspaceState.panelInputDisplay !== 'none' || workspaceState.panelOutputDisplay !== 'none' || !workspaceState.inspectorVisible || workspaceState.groupCount < 4 || !workspaceState.workflowPrompt || !workspaceState.workflowOptimize || !workspaceState.workflowIterate || !workspaceState.compositionMoved || workspaceState.rightHasScene || workspaceState.rightHasDimensions || !workspaceState.floatingToolsVisible || !workspaceState.floatingSceneMounted || !workspaceState.floatingSlidersMounted || !workspaceState.floatingRadarMounted || !workspaceState.noBoardLayerOverlap || !workspaceState.noLayerInspectorOverlap || !workspaceState.noCanvasHorizontalOverflow) {
+        throw new Error(`poster workspace layout mismatch: ${JSON.stringify(workspaceState)}`);
+      }
+
+      const presetBtn = page.locator('#composition-container .comp-pill[data-size-mode="preset_resolution"]');
+      const customBtn = page.locator('#composition-container .comp-pill[data-size-mode="custom_pixel"]');
+      const widthInput = page.locator('#composition-container .comp-size-input[data-field="width"]');
+      const heightInput = page.locator('#composition-container .comp-size-input[data-field="height"]');
+
+      await setCompositionRatio(page, '16:9');
+      await presetBtn.click();
+      await setCompositionLongEdge(page, '1536');
+      const rr = await page.evaluate(async () => {
+        const { getCompositionData } = await import('/js/composition.js');
+        const d = getCompositionData();
+        return {
+          mode: d.sizeMode,
+          width: d.width,
+          height: d.height,
+          widthInputPresent: document.querySelector('#composition-container .comp-size-input[data-field="width"]') !== null,
+          heightInputPresent: document.querySelector('#composition-container .comp-size-input[data-field="height"]') !== null,
+        };
+      });
+      if (rr.mode !== 'preset_resolution' || rr.width !== 1536 || rr.height !== 864 || rr.widthInputPresent || rr.heightInputPresent) {
+        throw new Error(`poster preset_resolution mismatch: ${JSON.stringify(rr)}`);
+      }
+
+      await customBtn.click();
+      await setCompositionRatio(page, '2:3');
+      await widthInput.fill('1000');
+      await widthInput.press('Tab');
+      const locked = await page.evaluate(async () => {
+        const { getCompositionData } = await import('/js/composition.js');
+        const d = getCompositionData();
+        return { mode: d.sizeMode, ratio: d.ratio, width: d.width, height: d.height, ratioLock: d.ratioLock };
+      });
+      if (locked.mode !== 'custom_pixel' || locked.ratio !== '2:3' || locked.width !== 1000 || locked.height !== 1500 || !locked.ratioLock) {
+        throw new Error(`poster custom locked mismatch: ${JSON.stringify(locked)}`);
+      }
+
+      await setCompositionRatio(page, 'free');
+      await widthInput.fill('1200');
+      await widthInput.press('Tab');
+      await heightInput.fill('1000');
+      await heightInput.press('Tab');
+      const custom = await page.evaluate(async () => {
+        const { getCompositionData } = await import('/js/composition.js');
+        const d = getCompositionData();
+        return { mode: d.sizeMode, ratio: d.ratio, width: d.width, height: d.height, ratioLock: d.ratioLock };
+      });
+      if (custom.mode !== 'custom_pixel' || custom.ratio !== '6:5' || custom.width !== 1200 || custom.height !== 1000 || custom.ratioLock) {
+        throw new Error(`poster custom unlocked mismatch: ${JSON.stringify(custom)}`);
+      }
+
+      return `poster sizes ok preset=${rr.width}x${rr.height}, locked=${locked.width}x${locked.height}, custom=${custom.width}x${custom.height}`;
+    } finally {
+      if (entered && !shouldRunStep('Poster inspector body owns desktop scrolling without page overflow')) {
+        await ensureNormalMode(page);
+      }
+    }
+  });
+
+  await runStep('Poster floating panels open scene and dimensions without right-column crowding', async () => {
+    let entered = false;
+    try {
+      const alreadyEntered = await page.evaluate(() => document.body.classList.contains('poster-workspace-active'));
+      if (!alreadyEntered) {
+        await page.fill('#prompt-input', '');
+        await page.click('#btn-poster-mode');
+        await page.waitForFunction(() => document.body.classList.contains('poster-workspace-active'), null, { timeout: 5000 });
+      }
+      entered = true;
+
+      const layoutState = await page.evaluate(() => {
+        document.querySelectorAll('#poster-inspector .poster-group').forEach((group) => {
+          if (group instanceof HTMLDetailsElement) group.open = true;
+        });
+        const inspector = document.getElementById('poster-inspector');
+        const header = document.querySelector('.poster-inspector-header');
+        const body = document.getElementById('poster-inspector-body');
+        const canvas = document.getElementById('canvas-section');
+        const resultGroup = document.querySelector('.poster-group-result');
+        const beforeHeaderTop = header?.getBoundingClientRect().top || 0;
+        if (body) body.scrollTop = body.scrollHeight;
+        const afterHeaderTop = header?.getBoundingClientRect().top || 0;
+        const bodyStyle = body ? window.getComputedStyle(body) : null;
+        const bodyRect = body?.getBoundingClientRect();
+        const resultRect = resultGroup?.getBoundingClientRect();
+        const gridStyle = window.getComputedStyle(document.querySelector('.app-main'));
+        const layerInCanvas = document.querySelector('#canvas-section #layer-panel') !== null;
+        const rightHasScene = document.querySelector('#poster-slot-scene, .poster-group-scene') !== null;
+        const rightHasDimensions = document.querySelector('#poster-slot-dimensions, .poster-group-dimensions') !== null;
+        const floatingToolsInInspector = document.querySelector('#poster-inspector-body > #poster-floating-tools') !== null;
+        const floatingToolsPosition = window.getComputedStyle(document.getElementById('poster-floating-tools')).position;
+        const clippedOpenGroups = [...document.querySelectorAll('#poster-inspector .poster-group[open]')]
+          .filter((group) => group.scrollHeight > group.clientHeight + 2)
+          .map((group) => group.className);
+        return {
+          bodyOverflowY: bodyStyle?.overflowY,
+          bodyFlexGrow: bodyStyle?.flexGrow,
+          bodyScrollable: Boolean(body && body.scrollHeight > body.clientHeight + 8),
+          bodyScrolled: Boolean(body && body.scrollTop > 0),
+          clippedOpenGroups,
+          resultReachable: Boolean(bodyRect && resultRect && resultRect.bottom <= bodyRect.bottom + 2),
+          headerPinned: Math.abs(afterHeaderTop - beforeHeaderTop) < 1,
+          inspectorHeight: inspector?.getBoundingClientRect().height || 0,
+          canvasHeight: canvas?.getBoundingClientRect().height || 0,
+          noHorizontalOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+          gridColumns: gridStyle.gridTemplateColumns,
+          layerInCanvas,
+          rightHasScene,
+          rightHasDimensions,
+          floatingToolsInInspector,
+          floatingToolsPosition,
+        };
+      });
+
+      if (layoutState.bodyOverflowY !== 'auto' || Number(layoutState.bodyFlexGrow) < 1 || layoutState.clippedOpenGroups.length > 0 || !layoutState.resultReachable || !layoutState.headerPinned || !layoutState.noHorizontalOverflow || !layoutState.layerInCanvas || layoutState.rightHasScene || layoutState.rightHasDimensions || !layoutState.floatingToolsInInspector || layoutState.floatingToolsPosition === 'fixed') {
+        throw new Error(`poster desktop scroll layout mismatch: ${JSON.stringify(layoutState)}`);
+      }
+      if (layoutState.inspectorHeight < 360 || layoutState.canvasHeight < 360) {
+        throw new Error(`poster workspace height too small: ${JSON.stringify(layoutState)}`);
+      }
+
+      await page.click('#btn-poster-float-scene');
+      await page.waitForSelector('#poster-floating-panel:not(.hidden) #poster-floating-scene:not(.hidden)', { timeout: 3000 });
+      const sceneFloat = await page.evaluate(() => {
+        const panel = document.getElementById('poster-floating-panel');
+        const sceneContent = document.getElementById('poster-floating-scene');
+        const sceneSection = document.querySelector('#poster-slot-floating-scene #scene-section');
+        const layout = document.querySelector('#poster-slot-floating-scene .scene-dual-layout');
+        const controls = document.querySelector('#poster-slot-floating-scene .scene-fold-controls');
+        const views = document.querySelector('#poster-slot-floating-scene .scene-fold-views');
+        return {
+          panelVisible: panel && !panel.classList.contains('hidden'),
+          sceneVisible: sceneContent && !sceneContent.classList.contains('hidden'),
+          sceneMounted: Boolean(sceneSection),
+          columns: layout ? window.getComputedStyle(layout).gridTemplateColumns : '',
+          controlsOpen: controls instanceof HTMLDetailsElement ? controls.open : false,
+          viewsOpen: views instanceof HTMLDetailsElement ? views.open : false,
+        };
+      });
+      if (!sceneFloat.panelVisible || !sceneFloat.sceneVisible || !sceneFloat.sceneMounted || !sceneFloat.controlsOpen || !sceneFloat.viewsOpen || !sceneFloat.columns.includes('px')) {
+        throw new Error(`poster scene floating panel mismatch: ${JSON.stringify(sceneFloat)}`);
+      }
+
+      await page.click('#btn-poster-float-dimensions');
+      await page.waitForSelector('#poster-floating-panel:not(.hidden) #poster-floating-dimensions:not(.hidden)', { timeout: 3000 });
+      const dimensionFloat = await page.evaluate(() => {
+        const dimContent = document.getElementById('poster-floating-dimensions');
+        const sliders = document.querySelector('#poster-slot-floating-dimensions-controls #sliders-section');
+        const radar = document.querySelector('#poster-slot-floating-dimensions-radar #radar-section');
+        const hasOptimize = document.querySelector('#poster-slot-floating-dimensions-controls #btn-optimize') !== null;
+        const hasIterate = document.querySelector('#poster-slot-floating-dimensions-controls #btn-iterate-analysis') !== null;
+        const columns = dimContent ? window.getComputedStyle(dimContent).gridTemplateColumns : '';
+        return {
+          dimensionsVisible: dimContent && !dimContent.classList.contains('hidden'),
+          slidersMounted: Boolean(sliders),
+          radarMounted: Boolean(radar),
+          hasOptimize,
+          hasIterate,
+          columns,
+        };
+      });
+      if (!dimensionFloat.dimensionsVisible || !dimensionFloat.slidersMounted || !dimensionFloat.radarMounted || dimensionFloat.hasOptimize || dimensionFloat.hasIterate || !dimensionFloat.columns.includes('px')) {
+        throw new Error(`poster dimensions floating panel mismatch: ${JSON.stringify(dimensionFloat)}`);
+      }
+
+      return `floating scene/dimensions ok, inspector=${Math.round(layoutState.inspectorHeight)}, canvas=${Math.round(layoutState.canvasHeight)}`;
+    } finally {
+      if (entered) {
+        await ensureNormalMode(page);
+        const modeText = await page.locator('#btn-poster-mode').innerText();
+        if (!modeText.includes('进入海报模式')) {
+          throw new Error(`poster mode button did not reset: ${modeText}`);
+        }
+      }
+    }
+  });
+
+  await runStep('Exit poster mode keeps normal analyze flow available', async () => {
+    await ensureNormalMode(page);
+    const targetScene = page.locator('#scene-section');
+    const sceneVisibleBeforeAnalyze = await targetScene.isVisible();
+    if (!sceneVisibleBeforeAnalyze) {
+      await page.evaluate(() => {
+        document.getElementById('scene-section')?.style.setProperty('display', '');
+      });
+    }
+
+    const mockStructure = buildMockAnalysisContent();
+    const mockLighting = JSON.stringify({
+      lights: {
+        light1: { on: true, type: '聚光灯', lumens: 5000 },
+        light2: { on: true, type: '柔光箱', lumens: 2200 },
+        light3: { on: true, type: '发灯', lumens: 1800 },
+        light4: { on: false, type: '发灯', lumens: 1000 },
+      },
+      reason: 'smoke_stub',
+    });
+
+    await page.route('**/api/analyze-orchestrate', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          orchestration: {
+            path: ['structure', 'lighting', 'normalize'],
+            roleStatus: {
+              structure: { status: 'ok', detail: '' },
+              lighting: { status: 'ok', detail: '' },
+              normalize: { status: 'ok', detail: 'local_contract_check' },
+            },
+            fallbackUsed: false,
+          },
+          outputs: {
+            structure: { content: mockStructure },
+            lighting: { content: mockLighting },
+            lightingRetry: { used: false, content: '' },
+          },
+        }),
+      });
+    });
+
+    await page.fill('#prompt-input', '夜晚街头，雨中霓虹反射，电影感');
+    await page.click('#btn-analyze');
+    await page.waitForSelector('#scene-section', { timeout: 12000, state: 'attached' });
+    await page.waitForSelector('#sliders-section', { timeout: 12000, state: 'attached' });
+    await page.unroute('**/api/analyze-orchestrate');
+    await clearConfirmOverlay(page);
+
+    const posterHidden = await page.locator('#poster-mode-status').evaluate((el) => el.classList.contains('hidden'));
+    if (!posterHidden) {
+      throw new Error('poster status should remain hidden in normal analyze mode');
+    }
+    const workspaceInactive = await page.evaluate(() => !document.body.classList.contains('poster-workspace-active'));
+    if (!workspaceInactive) {
+      throw new Error('normal analyze should keep poster workspace inactive');
+    }
+    return 'normal analyze still works after poster mode exit';
+  });
+
+  await runStep('Composition size rules work (preset resolution / custom pixels)', async () => {
+    await ensureNormalMode(page);
+    await clearConfirmOverlay(page);
+    await page.evaluate(() => {
+      document.getElementById('canvas-section')?.style.setProperty('display', '');
+    });
+
+    const presetBtn = page.locator('#composition-container .comp-pill[data-size-mode="preset_resolution"]');
+    const customBtn = page.locator('#composition-container .comp-pill[data-size-mode="custom_pixel"]');
+    const widthInput = page.locator('#composition-container .comp-size-input[data-field="width"]');
+    const heightInput = page.locator('#composition-container .comp-size-input[data-field="height"]');
+
+    await setCompositionRatio(page, '16:9');
+    await presetBtn.click();
+    await setCompositionLongEdge(page, '1536');
+    const landscapeDisplay = await getCanvasDisplayState(page);
+    if (landscapeDisplay?.displayRatio !== '10:7') {
+      throw new Error(`landscape display ratio mismatch: ${JSON.stringify(landscapeDisplay)}`);
+    }
+
+    const rr = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      const d = getCompositionData();
+      const widthInputPresent = document.querySelector('#composition-container .comp-size-input[data-field="width"]') !== null;
+      const heightInputPresent = document.querySelector('#composition-container .comp-size-input[data-field="height"]') !== null;
+      return {
+        mode: d.sizeMode,
+        ratio: d.ratio,
+        width: d.width,
+        height: d.height,
+        widthInputPresent,
+        heightInputPresent,
+      };
+    });
+    if (rr.mode !== 'preset_resolution' || rr.width !== 1536 || rr.height !== 864 || rr.widthInputPresent || rr.heightInputPresent) {
+      throw new Error(`preset_resolution mismatch: ${JSON.stringify(rr)}`);
+    }
+
+    await setCompositionRatio(page, '2:3');
+    await setCompositionLongEdge(page, '1536');
+    const portraitDisplay = await getCanvasDisplayState(page);
+    if (portraitDisplay?.displayRatio !== '3:4') {
+      throw new Error(`portrait display ratio mismatch: ${JSON.stringify(portraitDisplay)}`);
+    }
+    const portrait = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      return getCompositionData();
+    });
+    if (portrait.sizeMode !== 'preset_resolution' || portrait.ratio !== '2:3' || portrait.width !== 1024 || portrait.height !== 1536) {
+      throw new Error(`preset portrait mismatch: ${JSON.stringify(portrait)}`);
+    }
+
+    await setCompositionRatio(page, '1:1');
+    await setCompositionLongEdge(page, '2048');
+    const squareDisplay = await getCanvasDisplayState(page);
+    if (squareDisplay?.displayRatio !== '1:1') {
+      throw new Error(`square display ratio mismatch: ${JSON.stringify(squareDisplay)}`);
+    }
+    const square = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      return getCompositionData();
+    });
+    if (square.sizeMode !== 'preset_resolution' || square.ratio !== '1:1' || square.width !== 2048 || square.height !== 2048) {
+      throw new Error(`preset square mismatch: ${JSON.stringify(square)}`);
+    }
+
+    await setCompositionRatio(page, '1618:1000');
+    const golden = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      return getCompositionData();
+    });
+    if (golden.ratio !== '1618:1000' || golden.orientation !== 'landscape') {
+      throw new Error(`golden ratio mismatch: ${JSON.stringify(golden)}`);
+    }
+
+    await page.click('button.ui-mode-btn[data-ui-mode="pro"]');
+    await setCompositionRatio(page, '210:297');
+    const paper = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      return getCompositionData();
+    });
+    if (paper.ratio !== '210:297' || paper.orientation !== 'portrait') {
+      throw new Error(`paper ratio mismatch: ${JSON.stringify(paper)}`);
+    }
+
+    await customBtn.click();
+    await setCompositionRatio(page, '2:3');
+    await widthInput.fill('1000');
+    await widthInput.press('Tab');
+    const locked = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      return getCompositionData();
+    });
+    if (locked.sizeMode !== 'custom_pixel' || locked.ratio !== '2:3' || locked.width !== 1000 || locked.height !== 1500 || !locked.ratioLock) {
+      throw new Error(`custom locked mismatch: ${JSON.stringify(locked)}`);
+    }
+
+    await setCompositionRatio(page, 'free');
+    await widthInput.fill('1200');
+    await widthInput.press('Tab');
+    await heightInput.fill('1000');
+    await heightInput.press('Tab');
+    const custom = await page.evaluate(async () => {
+      const { getCompositionData } = await import('/js/composition.js');
+      return getCompositionData();
+    });
+    if (custom.sizeMode !== 'custom_pixel' || custom.ratio !== '6:5' || custom.width !== 1200 || custom.height !== 1000 || custom.ratioLock) {
+      throw new Error(`custom unlocked mismatch: ${JSON.stringify(custom)}`);
+    }
+
+    return 'preset=1536x864/1024x1536/2048x2048, custom locked=1000x1500, custom=1200x1000';
+  });
+
+  await runStep('Optimize request includes composition size fields', async () => {
+    await ensureNormalMode(page);
+    await page.route('**/api/analyze-orchestrate', async (route, request) => {
+      const body = request.postDataJSON();
+      const messages = Array.isArray(body?.roles?.normalize?.messages) ? body.roles.normalize.messages : [];
+      const userMsg = messages.find((m) => m.role === 'user');
+      const content = userMsg?.content || '';
+      const isOptimize = typeof content === 'string' && content.includes('Original prompt:') && content.includes('Composition:');
+      if (isOptimize) {
+        const promptText = 'optimized prompt, 16:9 landscape, --ar 16:9';
+        const contract = {
+          schemaVersion: 'cc.optimize.v1',
+          orderedFields: ['schemaVersion', 'orderedFields', 'blocks', 'finalPrompt', 'checks'],
+          blocks: {
+            subject: 'optimized subject',
+            composition: '16:9 landscape, final canvas size 1536x864 px, --ar 16:9',
+            foreground: 'foreground',
+            background: 'background',
+            camera: 'camera',
+            lighting: 'lighting',
+            style: 'style',
+            exactText: 'none',
+            negativeConstraints: 'none',
+            renderConstraints: 'constraints',
+          },
+          finalPrompt: promptText,
+          checks: {
+            ratio: '16:9',
+            orientation: 'landscape',
+            finalSize: '1536x864',
+            containsSingleAr: true,
+            exactTextProtected: true,
+            negativeConstraintsPreserved: true,
+          },
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            orchestration: {
+              path: ['structure', 'lighting', 'normalize'],
+              roleStatus: {
+                structure: { status: 'skipped', detail: 'not_requested', contractValid: true, contractErrors: [], semanticConflicts: [] },
+                lighting: { status: 'skipped', detail: 'not_requested', contractValid: true, contractErrors: [], semanticConflicts: [] },
+                normalize: { status: 'ok', detail: 'first-pass', contractValid: true, contractErrors: [], semanticConflicts: [] },
+              },
+              fallbackUsed: false,
+            },
+            outputs: {
+              structure: { content: '' },
+              lighting: { content: '' },
+              lightingRetry: { used: false, content: '' },
+              normalize: { content: JSON.stringify(contract), contract: { finalPrompt: promptText, blocks: contract.blocks, checks: contract.checks } },
+            },
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    const capturedBody = await waitForRequestJson(
+      page,
+      (request) => {
+        if (!request.url().endsWith('/api/analyze-orchestrate') || request.method() !== 'POST') return false;
+        const body = request.postDataJSON();
+        const messages = Array.isArray(body?.roles?.normalize?.messages) ? body.roles.normalize.messages : [];
+        const userMsg = messages.find((m) => m.role === 'user');
+        const content = userMsg?.content || '';
+        return typeof content === 'string' && content.includes('Original prompt:') && content.includes('Composition:');
+      },
+      async () => {
+        await page.click('#btn-optimize');
+      },
+      6000,
+    );
+    await page.unroute('**/api/analyze-orchestrate');
+
+    if (!capturedBody) {
+      throw new Error('failed to capture optimize /api/analyze-orchestrate body');
+    }
+    const userMsg = capturedBody.roles.normalize.messages.find((m) => m.role === 'user');
+    const text = String(userMsg?.content || '');
+    const required = ['aspect ratio', 'final canvas size', '--ar '];
+    for (const marker of required) {
+      if (!text.includes(marker)) {
+        throw new Error(`optimize composition missing marker: ${marker}`);
+      }
+    }
+    const banned = ['cm', 'dpi', 'print size', 'mode=', 'long-edge=', 'final-size='];
+    for (const marker of banned) {
+      if (text.toLowerCase().includes(marker)) {
+        throw new Error(`optimize composition contains obsolete marker: ${marker}`);
+      }
+    }
+    return 'composition includes aspect ratio and final pixel size only';
+  });
+
   await runStep('Scene UI uses 光源1~4 and includes 光源4 controls', async () => {
+    await ensureNormalMode(page);
     await page.evaluate(async () => {
       const { initScene } = await import('/js/scene.js');
       const section = document.getElementById('scene-section');
@@ -149,7 +1114,147 @@ async function main() {
     return 'legend and light cards include 光源1~4';
   });
 
+  await runStep('Dynamic lights can expand to 12 and shrink back', async () => {
+    await ensureNormalMode(page);
+    await page.evaluate(async () => {
+      const { initScene } = await import('/js/scene.js');
+      const section = document.getElementById('scene-section');
+      section.style.display = '';
+      initScene('scene-container');
+    });
+
+    for (let i = 0; i < 8; i += 1) {
+      await page.click('#scene-container .scene-light-action-btn');
+    }
+    const countAfterAdd = await page.locator('#scene-container .light-card').count();
+    if (countAfterAdd !== 12) {
+      throw new Error(`expected 12 lights after add, got ${countAfterAdd}`);
+    }
+
+    const addDisabledAtCap = await page.locator('#scene-container .scene-light-action-btn').isDisabled();
+    if (!addDisabledAtCap) {
+      throw new Error('add button should be disabled at 12 lights');
+    }
+
+    const removeBtn = page.locator('#scene-container .light-card-light12 .scene-light-remove-btn');
+    const removable = await removeBtn.count();
+    if (removable === 0) {
+      throw new Error('missing light12 remove button');
+    }
+    await removeBtn.click();
+    const countAfterRemove = await page.locator('#scene-container .light-card').count();
+    if (countAfterRemove !== 11) {
+      throw new Error(`expected 11 lights after remove, got ${countAfterRemove}`);
+    }
+
+    await page.click('#scene-container .scene-light-action-btn');
+    const countFinal = await page.locator('#scene-container .light-card').count();
+    if (countFinal !== 12) {
+      throw new Error(`expected 12 lights after add-back, got ${countFinal}`);
+    }
+    return 'add/remove to cap works';
+  });
+
+  await runStep('Three.js preview canvas loads beside three-view panel', async () => {
+    await ensureNormalMode(page);
+    await page.evaluate(async () => {
+      const sceneMod = await import('/js/scene.js');
+      const previewMod = await import('/js/scene-preview-3d.js');
+      const section = document.getElementById('scene-section');
+      section.style.display = '';
+      sceneMod.initScene('scene-container');
+      previewMod.initScenePreview3D('scene-3d-preview', sceneMod.getScenePreviewState());
+      window.__smokeSceneUnsub?.();
+      window.__smokeSceneUnsub = sceneMod.subscribeSceneState((snapshot) => {
+        previewMod.updateScenePreview3D(snapshot);
+      });
+    });
+    await page.waitForSelector('#scene-3d-preview', { timeout: 5000 });
+    await page.waitForSelector('#scene-3d-preview canvas', { timeout: 20000 });
+    const size = await page.$eval('#scene-3d-preview canvas', (canvas) => ({
+      width: canvas.clientWidth,
+      height: canvas.clientHeight,
+    }));
+    if (!size.width || !size.height) {
+      throw new Error(`invalid canvas size: ${JSON.stringify(size)}`);
+    }
+    const previewBox = await page.locator('#scene-3d-preview').boundingBox();
+    const topViewBox = await page.locator('#scene-container .scene-view[data-view="top"]').boundingBox();
+    if (!previewBox || !topViewBox) {
+      throw new Error('missing preview/top-view layout box');
+    }
+    if (!(previewBox.y + previewBox.height <= topViewBox.y + 8)) {
+      throw new Error(`3D preview should be above three-view. preview=${JSON.stringify(previewBox)} topView=${JSON.stringify(topViewBox)}`);
+    }
+    return `canvas=${size.width}x${size.height}`;
+  });
+
+  await runStep('Light5~Light12 are visible in three-view and synced to scene snapshot', async () => {
+    await ensureNormalMode(page);
+    await page.evaluate(async () => {
+      const sceneMod = await import('/js/scene.js');
+      const previewMod = await import('/js/scene-preview-3d.js');
+      const section = document.getElementById('scene-section');
+      section.style.display = '';
+      sceneMod.initScene('scene-container');
+      for (let i = 0; i < 8; i += 1) {
+        const btn = document.querySelector('#scene-container .scene-light-action-btn');
+        btn?.click();
+      }
+      previewMod.initScenePreview3D('scene-3d-preview', sceneMod.getScenePreviewState());
+      window.__smokeSceneUnsub?.();
+      window.__smokeSceneUnsub = sceneMod.subscribeSceneState((snapshot) => {
+        previewMod.updateScenePreview3D(snapshot);
+      });
+    });
+    await page.waitForSelector('#scene-3d-preview canvas', { timeout: 20000 });
+
+    const light12Top = await page.locator('#scene-container .scene-view[data-view="top"] .scene-light[data-id="light-light12"]').count();
+    const snapshotLightCount = await page.evaluate(async () => {
+      const { getScenePreviewState } = await import('/js/scene.js');
+      const snapshot = getScenePreviewState();
+      return Array.isArray(snapshot?.lightsList) ? snapshot.lightsList.length : 0;
+    });
+
+    if (light12Top === 0) {
+      throw new Error('light12 indicator missing in top view');
+    }
+    if (snapshotLightCount !== 12) {
+      throw new Error(`expected lightsList=12, got ${snapshotLightCount}`);
+    }
+    return `light12Visible=${light12Top > 0}, snapshotLights=${snapshotLightCount}`;
+  });
+
+  await runStep('Camera preset altitude semantics are correct', async () => {
+    await ensureNormalMode(page);
+    await page.evaluate(async () => {
+      const sceneMod = await import('/js/scene.js');
+      const section = document.getElementById('scene-section');
+      section.style.display = '';
+      sceneMod.initScene('scene-container');
+    });
+
+    const pickHeight = async (presetName) => {
+      await page.click(`#scene-container .camera-preset[data-name="${presetName}"]`);
+      return page.evaluate(async () => {
+        const sceneMod = await import('/js/scene.js');
+        return sceneMod.getScenePreviewState().camera.z;
+      });
+    };
+
+    const eye = await pickHeight('平视');
+    const high = await pickHeight('俯拍');
+    const low = await pickHeight('仰拍');
+    const bird = await pickHeight('鸟瞰');
+
+    if (!(high > eye && bird > high && low < eye)) {
+      throw new Error(`invalid camera preset altitude: eye=${eye}, high=${high}, low=${low}, bird=${bird}`);
+    }
+    return `eye=${eye}, high=${high}, low=${low}, bird=${bird}`;
+  });
+
   await runStep('Three-view synchronized drag works for camera and light4', async () => {
+    await ensureNormalMode(page);
     const topCamera = page.locator('#scene-container .scene-view[data-view="top"] .scene-camera[data-id="camera"]');
     const frontCamera = page.locator('#scene-container .scene-view[data-view="front"] .scene-camera[data-id="camera"]');
     const sideCamera = page.locator('#scene-container .scene-view[data-view="side"] .scene-camera[data-id="camera"]');
@@ -212,6 +1317,7 @@ async function main() {
   });
 
   await runStep('Coverage masks exist and respond to light type/lumens changes', async () => {
+    await ensureNormalMode(page);
     const topCoverageSelector = '#scene-container .scene-view[data-view="top"] .scene-coverage[data-entity="light-key"]';
     await page.waitForSelector(topCoverageSelector, { timeout: 5000 });
 
@@ -223,7 +1329,14 @@ async function main() {
     await page.selectOption('#scene-container .light-card-key .light-type-select', '霓虹灯');
     await page.fill('#scene-container .light-card-key .light-lm-input', '9000');
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(200);
+    await page.waitForFunction(
+      ({ selector, beforeWidth, beforeClip }) => {
+        const el = document.querySelector(selector);
+        return el && el.style.width && (el.style.width !== beforeWidth || el.style.clipPath !== beforeClip);
+      },
+      { selector: topCoverageSelector, beforeWidth: before.width, beforeClip: before.clip },
+      { timeout: 3000 },
+    );
 
     const after = await page.$eval(topCoverageSelector, (el) => ({
       width: el.style.width,
@@ -240,6 +1353,7 @@ async function main() {
   });
 
   await runStep('Canvas supports resize handle', async () => {
+    await ensureNormalMode(page);
     await page.evaluate(async () => {
       const { initCanvas } = await import('/js/canvas.js');
       const section = document.getElementById('canvas-section');
@@ -249,24 +1363,209 @@ async function main() {
       ]);
     });
 
-    await page.click('#layer-panel .layer-tag[data-id="elem_resize"]');
-    const handle = page.locator('#canvas-board .elem-box[data-id="elem_resize"] .elem-resize-handle');
-    const hb = await handle.boundingBox();
-    if (!hb) throw new Error('resize handle not found');
-
     const before = await getCanvasGeometry(page, 'elem_resize');
-    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(hb.x + hb.width / 2 + 28, hb.y + hb.height / 2 + 22);
-    await page.mouse.up();
+    await page.click('#canvas-board .elem-box[data-id="elem_resize"] .elem-box-edit');
+    await page.waitForSelector('body .edit-popup', { timeout: 3000 });
+    const sizeLabels = await page.locator('body .edit-popup .popup-field label').allTextContents();
+    if (!sizeLabels.some((text) => String(text).includes('尺寸'))) {
+      throw new Error('edit popup missing size controls');
+    }
+    await page.fill('body .edit-popup .popup-input[data-key="w"]', '26');
+    await page.fill('body .edit-popup .popup-input[data-key="h"]', '36');
+    await page.evaluate(() => {
+      const btn = document.querySelector('body .edit-popup .popup-close');
+      if (btn) btn.click();
+    });
+    await page.waitForSelector('body .edit-popup', { state: 'detached', timeout: 3000 });
+
     const after = await getCanvasGeometry(page, 'elem_resize');
-    if (!before || !after || after.w <= before.w || after.h <= before.h) {
+    if (!before || !after || after.w !== 26 || after.h !== 36 || after.w <= before.w || after.h <= before.h) {
       throw new Error(`resize failed: before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
     }
     return `size ${before.w}x${before.h} -> ${after.w}x${after.h}`;
   });
 
+  await runStep('Canvas exact text passthrough is preserved in optimize context', async () => {
+    await ensureNormalMode(page);
+    const state = await page.evaluate(async () => {
+      const { initCanvas, getCanvasData } = await import('/js/canvas.js');
+      const { buildOptimizeMessages } = await import('/js/prompt.js');
+      const section = document.getElementById('canvas-section');
+      section.style.display = '';
+      initCanvas('canvas-board', 'layer-panel', [
+        { id: 'elem_person', type: 'character', layer: 'foreground', name: '人物', description: '店门前人物', x: 52, y: 60, w: 18, h: 28, zIndex: 1 },
+        {
+          id: 'elem_text',
+          type: 'object',
+          layer: 'background',
+          name: '招牌',
+          x: 50,
+          y: 22,
+          w: 36,
+          h: 10,
+          zIndex: 2,
+          textPassthrough: { enabled: true, text: '夜间营业', typographyHint: 'bold neon sign' },
+        },
+      ]);
+      const canvasData = getCanvasData();
+      const messages = buildOptimizeMessages('招牌上写着“夜间营业”，店门前人物驻足', {
+        style: 6,
+        dimensions: [
+          { name: '画面细节', value: 68, max: 100, labels: ['简洁', '细腻'] },
+          { name: '光影层次', value: 72, max: 100, labels: ['平缓', '强烈'] },
+          { name: '色调氛围', value: 66, max: 100, labels: ['克制', '浓郁'] },
+          { name: '构图张力', value: 65, max: 100, labels: ['稳定', '张力'] },
+          { name: '材质表现', value: 61, max: 100, labels: ['概括', '写实'] },
+          { name: '叙事深度', value: 58, max: 100, labels: ['直给', '隐喻'] },
+          { name: '风格强度', value: 70, max: 100, labels: ['克制', '鲜明'] },
+          { name: '氛围渲染', value: 64, max: 100, labels: ['自然', '戏剧'] },
+        ],
+        composition: { ratio: '16:9', orientation: 'landscape', width: 1536, height: 864 },
+        elements: canvasData.elements,
+        links: canvasData.links,
+        scene: { cameraPreset: '平视', lightingPreset: '侧光' },
+      });
+      const userContent = messages.find((item) => item.role === 'user')?.content || '';
+      return {
+        element: canvasData.elements.find((item) => item.id === 'elem_text') || null,
+        layerBadgeText: document.querySelector('#layer-panel .layer-tag[data-id="elem_text"] .layer-tag-icon')?.textContent?.trim() || '',
+        boxText: document.querySelector('#canvas-board .elem-box[data-id="elem_text"] .elem-box-name')?.textContent?.trim() || '',
+        hasExactSection: userContent.includes('Exact text blocks, preserve verbatim:'),
+        hasExactText: userContent.includes('"夜间营业"'),
+        hasNoTranslateRule: userContent.includes('Do not translate, rewrite, correct, or change punctuation.'),
+        foregroundMentionsExactText: /Foreground elements[\s\S]*夜间营业[\s\S]*Background elements/.test(userContent),
+        backgroundMentionsExactText: /Background elements[\s\S]*夜间营业[\s\S]*Exact text blocks/.test(userContent),
+      };
+    });
+    if (!state.element?.textPassthrough?.enabled || state.element.textPassthrough.text !== '夜间营业') {
+      throw new Error(`textPassthrough not preserved in canvas data: ${JSON.stringify(state)}`);
+    }
+    if (state.layerBadgeText !== '文' || state.boxText !== '夜间营业') {
+      throw new Error(`text passthrough not visible in canvas/layer UI: ${JSON.stringify(state)}`);
+    }
+    if (!state.hasExactSection || !state.hasExactText || !state.hasNoTranslateRule) {
+      throw new Error(`exact text block missing from optimize context: ${JSON.stringify(state)}`);
+    }
+    if (state.foregroundMentionsExactText || state.backgroundMentionsExactText) {
+      throw new Error(`exact text duplicated in regular element sections: ${JSON.stringify(state)}`);
+    }
+    return 'exact text block "夜间营业" preserved and isolated';
+  });
+
+  await runStep('Canvas negative prompts are preserved in optimize context', async () => {
+    await ensureNormalMode(page);
+    const state = await page.evaluate(async () => {
+      const { initCanvas, getCanvasData } = await import('/js/canvas.js');
+      const { buildOptimizeMessages, parseOptimizeResponse } = await import('/js/prompt.js');
+      const section = document.getElementById('canvas-section');
+      section.style.display = '';
+      initCanvas('canvas-board', 'layer-panel', {
+        canvasNegativePrompt: { enabled: true, text: 'no background people' },
+        elements: [
+          {
+            id: 'elem_person',
+            type: 'character',
+            layer: 'foreground',
+            name: '人物',
+            description: '店门前人物',
+            x: 52,
+            y: 60,
+            w: 18,
+            h: 28,
+            zIndex: 1,
+            negativePrompt: { enabled: true, text: 'deformed hands' },
+          },
+          { id: 'elem_bg', type: 'object', layer: 'background', name: '背景', x: 50, y: 42, w: 62, h: 40, zIndex: 0 },
+        ],
+        links: [],
+      });
+      const canvasData = getCanvasData();
+      const messages = buildOptimizeMessages('人物站在店门前，背景不要有人，手部不能走形', {
+        style: 8,
+        dimensions: [
+          { name: '画面细节', value: 68, max: 100, labels: ['简洁', '细腻'] },
+          { name: '光影层次', value: 72, max: 100, labels: ['平缓', '强烈'] },
+          { name: '色调氛围', value: 66, max: 100, labels: ['克制', '浓郁'] },
+          { name: '构图张力', value: 65, max: 100, labels: ['稳定', '张力'] },
+          { name: '材质表现', value: 61, max: 100, labels: ['概括', '写实'] },
+          { name: '叙事深度', value: 58, max: 100, labels: ['直给', '隐喻'] },
+          { name: '风格强度', value: 70, max: 100, labels: ['克制', '鲜明'] },
+          { name: '氛围渲染', value: 64, max: 100, labels: ['自然', '戏剧'] },
+        ],
+        composition: { ratio: '16:9', orientation: 'landscape', width: 1536, height: 864 },
+        elements: canvasData.elements,
+        links: canvasData.links,
+        scene: { cameraPreset: '平视', lightingPreset: '侧光' },
+        canvasNegativePrompt: canvasData.canvasNegativePrompt,
+      });
+      const userContent = messages.find((item) => item.role === 'user')?.content || '';
+      const parsed = parseOptimizeResponse(JSON.stringify({
+        schemaVersion: 'cc.optimize.v1',
+        orderedFields: ['schemaVersion', 'orderedFields', 'blocks', 'finalPrompt', 'checks'],
+        blocks: {
+          subject: 'A person standing near a storefront',
+          composition: '16:9 landscape, final canvas size 1536x864 px, --ar 16:9',
+          foreground: 'The person is the main subject',
+          background: 'Clean storefront background',
+          camera: 'eye-level camera',
+          lighting: 'side lighting',
+          style: 'cinematic semi-realistic rendering',
+          exactText: 'none',
+          negativeConstraints: 'Avoid: no background people; deformed hands',
+          renderConstraints: 'clean prompt',
+        },
+        finalPrompt: 'A person standing near a storefront, clean storefront background, 16:9 landscape, final canvas size 1536x864 px, eye-level camera, side lighting, cinematic semi-realistic rendering, Avoid: no background people; deformed hands, --ar 16:9',
+        checks: {
+          ratio: '16:9',
+          orientation: 'landscape',
+          finalSize: '1536x864',
+          containsSingleAr: true,
+          exactTextProtected: true,
+          negativeConstraintsPreserved: true,
+        },
+      }), {
+        composition: { ratio: '16:9', orientation: 'landscape', width: 1536, height: 864 },
+        negativePrompts: [
+          { scope: 'global', text: 'no background people' },
+          { scope: 'object', elementId: 'elem_person', elementName: '人物', text: 'deformed hands' },
+        ],
+      });
+      return {
+        elementNegative: canvasData.elements.find((item) => item.id === 'elem_person')?.negativePrompt || null,
+        globalNegative: canvasData.canvasNegativePrompt || null,
+        layerBadgeText: document.querySelector('#layer-panel .layer-tag[data-id="elem_person"] .layer-tag-neg')?.textContent?.trim() || '',
+        boxBadgeText: document.querySelector('#canvas-board .elem-box[data-id="elem_person"] .elem-box-neg')?.textContent?.trim() || '',
+        hasNegativeSection: userContent.includes('Negative constraints, preserve as exclusions only:'),
+        hasGlobalNegative: userContent.includes('no background people'),
+        hasObjectNegative: userContent.includes('deformed hands'),
+        positiveMentionsObjectNegative: /Foreground elements[\s\S]*deformed hands[\s\S]*Background elements/.test(userContent),
+        contractValid: parsed?.contractMeta?.contractValid,
+        conflicts: parsed?.contractMeta?.semanticConflicts || [],
+      };
+    });
+    if (!state.elementNegative?.enabled || state.elementNegative.text !== 'deformed hands') {
+      throw new Error(`object negativePrompt not preserved: ${JSON.stringify(state)}`);
+    }
+    if (!state.globalNegative?.enabled || state.globalNegative.text !== 'no background people') {
+      throw new Error(`global canvasNegativePrompt not preserved: ${JSON.stringify(state)}`);
+    }
+    if (state.layerBadgeText !== '排' || state.boxBadgeText !== '排除') {
+      throw new Error(`negative prompt badges missing: ${JSON.stringify(state)}`);
+    }
+    if (!state.hasNegativeSection || !state.hasGlobalNegative || !state.hasObjectNegative) {
+      throw new Error(`negative constraints missing from optimize context: ${JSON.stringify(state)}`);
+    }
+    if (state.positiveMentionsObjectNegative) {
+      throw new Error(`negative constraint leaked into positive element sections: ${JSON.stringify(state)}`);
+    }
+    if (!state.contractValid || state.conflicts.length > 0) {
+      throw new Error(`negative optimize contract failed: ${JSON.stringify(state)}`);
+    }
+    return 'global and object-level negative prompts preserved and isolated';
+  });
+
   await runStep('Alt+click layer tag enters focus mode and cancel rolls back', async () => {
+    await ensureNormalMode(page);
     await page.evaluate(async () => {
       const { initCanvas } = await import('/js/canvas.js');
       initCanvas('canvas-board', 'layer-panel', [
@@ -297,6 +1596,7 @@ async function main() {
   });
 
   await runStep('Alt+click focus mode complete persists changes', async () => {
+    await ensureNormalMode(page);
     const before = await getCanvasGeometry(page, 'elem_focus');
     await page.click('#layer-panel .layer-tag[data-id="elem_focus"]', { modifiers: ['Alt'] });
     await page.waitForSelector('#layer-panel .layer-focus-actions', { timeout: 3000 });
@@ -320,6 +1620,7 @@ async function main() {
   });
 
   await runStep('Ctrl+click overlap selection cycles target', async () => {
+    await ensureNormalMode(page);
     await page.evaluate(async () => {
       const { initCanvas } = await import('/js/canvas.js');
       initCanvas('canvas-board', 'layer-panel', [
@@ -347,16 +1648,7 @@ async function main() {
   });
 
   await runStep('Mobile portrait scene fold sections are visible and interactive', async () => {
-    const mobileContext = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-      userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-      isMobile: true,
-      hasTouch: true,
-    });
-    const mobilePage = await mobileContext.newPage();
-
-    await mobilePage.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const mobilePage = await getMobilePage();
     await mobilePage.evaluate(async () => {
       const { initScene } = await import('/js/scene.js');
       const section = document.getElementById('scene-section');
@@ -371,15 +1663,212 @@ async function main() {
     const viewOpen = await mobilePage.locator('#scene-container .scene-fold-views').evaluate((el) => el.open);
     if (!viewOpen) throw new Error('views fold should be open by default on mobile');
 
-    await mobilePage.click('#scene-container .scene-fold-lights > .scene-fold-summary');
-    await mobilePage.waitForTimeout(120);
+    await mobilePage.click('#scene-container .scene-fold-lights > .scene-fold-summary', { force: true });
+    await mobilePage.waitForFunction(() => {
+      const fold = document.querySelector('#scene-container .scene-fold-lights');
+      return fold instanceof HTMLDetailsElement && fold.open;
+    }, null, { timeout: 3000 });
     const lightsOpen = await mobilePage.locator('#scene-container .scene-fold-lights').evaluate((el) => el.open);
     if (!lightsOpen) throw new Error('lights fold did not open after click');
 
-    await mobileContext.close();
     return `folds=${foldCount}, viewsOpen=${viewOpen}, lightsOpen=${lightsOpen}`;
   });
 
+  await runStep('Mobile poster mode uses fullscreen parameter page', async () => {
+    const mobilePage = await getMobilePage();
+    await mobilePage.waitForSelector('#btn-poster-mode', { timeout: 5000 });
+    await mobilePage.click('#btn-poster-mode');
+    await mobilePage.waitForFunction(() => document.body.classList.contains('poster-workspace-active'), null, { timeout: 5000 });
+
+    const openBtnVisible = await mobilePage.locator('#btn-open-poster-inspector').isVisible();
+    if (!openBtnVisible) {
+      throw new Error('mobile poster mode should show parameter button');
+    }
+
+    await mobilePage.click('#btn-open-poster-inspector');
+    await mobilePage.waitForFunction(() => document.getElementById('poster-inspector')?.classList.contains('open'), null, { timeout: 3000 });
+    await mobilePage.waitForFunction(() => {
+      const rect = document.getElementById('poster-inspector')?.getBoundingClientRect();
+      return rect && Math.abs(rect.left) < 2;
+    }, null, { timeout: 3000 });
+
+    const inspectorState = await mobilePage.evaluate(() => {
+      document.querySelectorAll('#poster-inspector .poster-group').forEach((group) => {
+        if (group instanceof HTMLDetailsElement) group.open = true;
+      });
+      const inspector = document.getElementById('poster-inspector');
+      const header = document.querySelector('.poster-inspector-header');
+      const body = document.getElementById('poster-inspector-body');
+      const resultGroup = document.querySelector('.poster-group-result');
+      const promptInWorkflow = document.querySelector('#poster-slot-workflow #prompt-input') !== null;
+      const panelInputHidden = window.getComputedStyle(document.querySelector('.panel-input')).display === 'none';
+      const layerInInspector = document.querySelector('#poster-slot-layers #layer-panel') !== null;
+      const beforeHeaderTop = header?.getBoundingClientRect().top || 0;
+      if (body) body.scrollTop = body.scrollHeight;
+      const afterHeaderTop = header?.getBoundingClientRect().top || 0;
+      const bodyStyle = body ? window.getComputedStyle(body) : null;
+      const bodyRect = body?.getBoundingClientRect();
+      const resultRect = resultGroup?.getBoundingClientRect();
+      const clippedOpenGroups = [...document.querySelectorAll('#poster-inspector .poster-group[open]')]
+        .filter((group) => group.scrollHeight > group.clientHeight + 2)
+        .map((group) => group.className);
+      return {
+        open: inspector?.classList.contains('open'),
+        height: inspector?.getBoundingClientRect().height || 0,
+        viewportHeight: window.innerHeight,
+        bodyOverflowY: bodyStyle?.overflowY,
+        bodyScrollable: Boolean(body && body.scrollHeight > body.clientHeight + 8),
+        bodyScrolled: Boolean(body && body.scrollTop > 0),
+        clippedOpenGroups,
+        resultReachable: Boolean(bodyRect && resultRect && resultRect.bottom <= bodyRect.bottom + 2),
+        headerPinned: Math.abs(afterHeaderTop - beforeHeaderTop) < 1,
+        promptInWorkflow,
+        panelInputHidden,
+        layerInInspector,
+        noHorizontalOverflow: Boolean(inspector && inspector.getBoundingClientRect().right <= window.innerWidth + 2),
+      };
+    });
+    if (!inspectorState.open || inspectorState.bodyOverflowY !== 'auto' || !inspectorState.bodyScrollable || !inspectorState.bodyScrolled || inspectorState.clippedOpenGroups.length > 0 || !inspectorState.promptInWorkflow || !inspectorState.panelInputHidden || !inspectorState.layerInInspector || !inspectorState.resultReachable || !inspectorState.headerPinned || !inspectorState.noHorizontalOverflow) {
+      throw new Error(`mobile inspector did not open correctly: ${JSON.stringify(inspectorState)}`);
+    }
+    if (inspectorState.height < 800 || inspectorState.height > inspectorState.viewportHeight + 2) {
+      throw new Error(`mobile inspector should fill viewport: ${JSON.stringify(inspectorState)}`);
+    }
+
+    await mobilePage.evaluate(() => {
+      const btn = document.getElementById('btn-close-poster-inspector');
+      if (btn) btn.click();
+    });
+    await mobilePage.waitForFunction(() => !document.getElementById('poster-inspector')?.classList.contains('open'), null, { timeout: 3000 });
+    const closed = await mobilePage.evaluate(() => !document.getElementById('poster-inspector')?.classList.contains('open'));
+    if (!closed) {
+      throw new Error('mobile inspector should close back to canvas');
+    }
+    return 'fullscreen parameter page scroll/open/close works';
+  });
+
+  await runStep('Template module save/export/import/apply works with composition fields', async () => {
+    await ensureNormalMode(page);
+    await page.waitForSelector('#template-container', { timeout: 5000 });
+    await page.evaluate(async () => {
+      const { initCanvas } = await import('/js/canvas.js');
+      const canvasSection = document.getElementById('canvas-section');
+      canvasSection.style.display = '';
+      initCanvas('canvas-board', 'layer-panel', []);
+    });
+
+    await page.fill('#template-container .template-name-input', 'smoke-template-1');
+    await page.click('#template-container .btn-primary');
+    await page.waitForTimeout(180);
+
+    const storedTemplate = await page.evaluate(() => {
+      const list = JSON.parse(localStorage.getItem('cc_templates') || '[]');
+      return list[0] || null;
+    });
+    if (!storedTemplate || storedTemplate.templateVersion !== 'cc.template.v1') {
+      throw new Error('template not stored with cc.template.v1');
+    }
+    const composition = storedTemplate.composition || {};
+    const required = ['sizeMode', 'ratio', 'resolutionLongEdge', 'width', 'height', 'orientation'];
+    const missing = required.filter((key) => composition[key] === undefined || composition[key] === null || composition[key] === '');
+    if (missing.length > 0) {
+      throw new Error(`template composition fields missing: ${missing.join(', ')}`);
+    }
+
+    const importedName = await page.evaluate(async () => {
+      const input = document.getElementById('template-import-file');
+      if (!input) return '';
+      const legacy = {
+        templateVersion: 'legacy.v0',
+        name: 'legacy-imported',
+        composition: { ratio: '4:3' },
+        elements: [],
+        links: [],
+        scene: null,
+        dimensions: [],
+      };
+      const blob = new Blob([JSON.stringify(legacy)], { type: 'application/json' });
+      const file = new File([blob], 'legacy-template.json', { type: 'application/json' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      const list = JSON.parse(localStorage.getItem('cc_templates') || '[]');
+      return list[0]?.name || '';
+    });
+    if (importedName !== 'legacy-imported') {
+      throw new Error(`legacy template import failed, got name=${importedName}`);
+    }
+    return 'template save/import with composition migration fields works';
+  });
+
+  await runStep('UI mode switch and version single source are visible', async () => {
+    await page.waitForSelector('#app-version', { timeout: 5000 });
+    const appVersion = await page.textContent('#app-version');
+    if (!/^Beta[A-Z]\.[a-z]\.\d+$/.test((appVersion || '').trim())) {
+      throw new Error(`invalid version format: ${appVersion}`);
+    }
+    const versionPlacement = await page.evaluate(() => ({
+      inSubtitleRow: document.getElementById('app-version')?.parentElement?.classList.contains('brand-subtitle-row') === true,
+      inHeaderRight: document.querySelector('.header-right #app-version') !== null,
+    }));
+    if (!versionPlacement.inSubtitleRow || versionPlacement.inHeaderRight) {
+      throw new Error(`version placement invalid: ${JSON.stringify(versionPlacement)}`);
+    }
+
+    await page.click('button.ui-mode-btn[data-ui-mode=\"pro\"]');
+    await page.waitForTimeout(120);
+    const proState = await page.evaluate(() => ({
+      mode: document.documentElement.dataset.uiMode,
+      proMenuExists: Boolean(document.getElementById('pro-menu-bar')),
+      bodyStripeHidden: getComputedStyle(document.body, '::before').display === 'none',
+      cardRadius: getComputedStyle(document.querySelector('.card')).borderRadius,
+      activeModeText: document.querySelector('button.ui-mode-btn[data-ui-mode="pro"].active')?.textContent?.trim() || '',
+    }));
+    if (proState.mode !== 'pro' || proState.proMenuExists || !proState.bodyStripeHidden || proState.activeModeText !== 'Pro') {
+      throw new Error(`pro mode did not activate: ${JSON.stringify(proState)}`);
+    }
+
+    await page.click('button.ui-mode-btn[data-ui-mode=\"candy\"]');
+    await page.waitForTimeout(120);
+    const candyState = await page.evaluate(() => ({
+      mode: document.documentElement.dataset.uiMode,
+      proMenuExists: Boolean(document.getElementById('pro-menu-bar')),
+      bodyStripeVisible: getComputedStyle(document.body, '::before').display !== 'none',
+      storage: localStorage.getItem('cc_ui_mode'),
+    }));
+    if (candyState.mode !== 'candy' || candyState.proMenuExists || !candyState.bodyStripeVisible || candyState.storage !== 'candy') {
+      throw new Error(`candy mode state invalid: ${JSON.stringify(candyState)}`);
+    }
+    return `version=${appVersion?.trim()}`;
+  });
+
+  await runStep('Code quality guard (no browser prompt/alert/confirm/debugger)', async () => {
+    const sourceFiles = [
+      'js/app.js',
+      'js/composition.js',
+      'js/canvas.js',
+      'js/scene.js',
+      'js/templates.js',
+      'js/ui-mode.js',
+    ];
+    const fsSync = await import('node:fs');
+    const badPattern = /\b(prompt|alert|confirm)\s*\(|\bdebugger\b/;
+    const bad = [];
+    for (const filePath of sourceFiles) {
+      const content = fsSync.readFileSync(path.resolve(filePath), 'utf8');
+      if (badPattern.test(content)) bad.push(filePath);
+    }
+    if (bad.length > 0) {
+      throw new Error(`disallowed patterns found in: ${bad.join(', ')}`);
+    }
+    return `checked ${sourceFiles.length} files`;
+  });
+
+  if (mobileContext) {
+    await mobileContext.close();
+  }
   await context.close();
   await browser.close();
 
@@ -401,4 +1890,3 @@ main().catch(async (error) => {
   console.error(error);
   process.exitCode = 1;
 });
-

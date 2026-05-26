@@ -2,6 +2,7 @@
  * scene.js — Scene Three-View Panel v5
  * Unified 3D scene state + three-view synchronized editing + light coverage visualization.
  */
+import { showToast } from './utils.js';
 
 /* ============ State ============ */
 let containerEl = null;
@@ -24,10 +25,15 @@ let sceneFoldState = {
   lights: false,
   controls: false,
 };
+const sceneSubscribers = new Set();
 
-const LIGHT_KEYS = ['key', 'fill', 'back', 'hair'];
+const BASE_LIGHT_KEYS = ['key', 'fill', 'back', 'hair'];
+const LEGACY_LIGHT_KEYS = ['key', 'fill', 'back', 'hair'];
+const MAX_LIGHT_COUNT = 12;
+const MIN_LIGHT_COUNT = 1;
+let lightIds = [...BASE_LIGHT_KEYS];
 
-/* ---- Light state: 4 lights ---- */
+/* ---- Light state: dynamic list (starts from 4 lights) ---- */
 let lights = {
   key: { x: 30, y: 25, z: 72, on: true, type: '聚光灯', watts: 500, lumens: 5000 },
   fill: { x: 70, y: 40, z: 58, on: true, type: '柔光箱', watts: 300, lumens: 3000 },
@@ -36,11 +42,16 @@ let lights = {
 };
 
 const LIGHT_META = {
-  key: { order: 1, label: '光源1', en: 'light source 1', color: 'var(--color-candy-lemon)' },
-  fill: { order: 2, label: '光源2', en: 'light source 2', color: 'var(--color-candy-sky)' },
-  back: { order: 3, label: '光源3', en: 'light source 3', color: 'var(--color-candy-peach)' },
-  hair: { order: 4, label: '光源4', en: 'light source 4', color: 'var(--color-candy-lavender)' },
+  key: { order: 1, label: '光源1', en: 'light source 1', color: '#FFE66D' },
+  fill: { order: 2, label: '光源2', en: 'light source 2', color: '#89CFF3' },
+  back: { order: 3, label: '光源3', en: 'light source 3', color: '#FFB997' },
+  hair: { order: 4, label: '光源4', en: 'light source 4', color: '#C3A6FF' },
 };
+const LIGHT_COLOR_PALETTE = [
+  '#FFE66D', '#89CFF3', '#FFB997', '#C3A6FF',
+  '#9FE870', '#FFC76A', '#7ED6DF', '#F4A6FF',
+  '#8BD1FF', '#FFD1A8', '#B7F7B0', '#D7C8FF',
+];
 
 const LIGHT_KEY_ALIASES = {
   key: 'key',
@@ -64,6 +75,103 @@ const LIGHT_KEY_ALIASES = {
   轮廓光: 'back',
   发灯: 'hair',
 };
+
+function getLightStateByKey(key) {
+  return key ? lights[key] || null : null;
+}
+
+function getLightMetaByKey(key) {
+  const index = lightIds.indexOf(key);
+  if (index < 0) {
+    return {
+      order: 0,
+      label: '光源?',
+      en: 'light source ?',
+      color: LIGHT_COLOR_PALETTE[0],
+    };
+  }
+  const fallback = {
+    order: index + 1,
+    label: `光源${index + 1}`,
+    en: `light source ${index + 1}`,
+    color: LIGHT_COLOR_PALETTE[index % LIGHT_COLOR_PALETTE.length],
+  };
+  return {
+    ...fallback,
+    ...(LIGHT_META[key] || {}),
+    order: index + 1,
+    label: `光源${index + 1}`,
+    en: `light source ${index + 1}`,
+    color: (LIGHT_META[key]?.color || fallback.color),
+  };
+}
+
+function getLegacyLightKeyMap() {
+  const map = {};
+  for (let i = 0; i < LEGACY_LIGHT_KEYS.length; i += 1) {
+    const alias = LEGACY_LIGHT_KEYS[i];
+    if (lightIds.includes(alias)) {
+      map[alias] = alias;
+      continue;
+    }
+    const fallbackKey = lightIds[i] || null;
+    if (fallbackKey) {
+      map[alias] = fallbackKey;
+    }
+  }
+  return map;
+}
+
+function resolveLightStateByLegacyAlias(alias) {
+  const map = getLegacyLightKeyMap();
+  const key = map[alias];
+  return key ? getLightStateByKey(key) : null;
+}
+
+function makeDefaultLightState(slot) {
+  const t = slot % 4;
+  const defaults = [
+    { x: 24, y: 24, z: 74, on: true, type: '聚光灯', watts: 500, lumens: 5000 },
+    { x: 74, y: 42, z: 58, on: true, type: '柔光箱', watts: 300, lumens: 3000 },
+    { x: 58, y: 84, z: 66, on: true, type: '环形灯', watts: 220, lumens: 2200 },
+    { x: 42, y: 74, z: 80, on: false, type: '发灯', watts: 100, lumens: 1000 },
+  ];
+  return { ...defaults[t] };
+}
+
+function createNewLightKey() {
+  return `light${lightIds.length + 1}`;
+}
+
+function addLight() {
+  if (lightIds.length >= MAX_LIGHT_COUNT) {
+    showToast(`最多支持 ${MAX_LIGHT_COUNT} 盏光源`, 'info');
+    return false;
+  }
+  const key = createNewLightKey();
+  lightIds.push(key);
+  lights[key] = makeDefaultLightState(lightIds.length - 1);
+  lightingPreset = '自定义';
+  updateLightDesc('');
+  markManualSceneChange();
+  render();
+  return true;
+}
+
+function removeLight(key) {
+  if (!key || !lightIds.includes(key)) return false;
+  if (lightIds.length <= MIN_LIGHT_COUNT) {
+    showToast('至少保留 1 盏光源', 'info');
+    return false;
+  }
+  lightIds = lightIds.filter((id) => id !== key);
+  delete lights[key];
+  lightingPreset = '自定义';
+  updateLightDesc('');
+  markManualSceneChange();
+  render();
+  return true;
+}
 
 let activeCameraPreset = null;
 const SCENE_AXIS_TICKS = [0, 25, 50, 75, 100];
@@ -108,10 +216,10 @@ const LIGHT_TYPES = [
 
 const CAMERA_PRESETS = [
   { name: '平视', desc: 'eye-level shot', cam: { x: 50, y: 85, z: 50 } },
-  { name: '俯拍', desc: 'high-angle shot', cam: { x: 50, y: 60, z: 25 } },
-  { name: '仰拍', desc: 'low-angle shot', cam: { x: 50, y: 85, z: 80 } },
-  { name: '鸟瞰', desc: "bird's eye view", cam: { x: 50, y: 50, z: 10 } },
-  { name: '45°斜角', desc: '45-degree angle shot', cam: { x: 30, y: 70, z: 35 } },
+  { name: '俯拍', desc: 'high-angle shot', cam: { x: 50, y: 62, z: 82 } },
+  { name: '仰拍', desc: 'low-angle shot', cam: { x: 50, y: 88, z: 24 } },
+  { name: '鸟瞰', desc: "bird's eye view", cam: { x: 50, y: 50, z: 95 } },
+  { name: '45°斜角', desc: '45-degree angle shot', cam: { x: 34, y: 70, z: 62 } },
 ];
 
 const APERTURE_OPTIONS = [
@@ -123,11 +231,11 @@ const APERTURE_OPTIONS = [
 ];
 
 const LIGHTING_PRESETS = [
-  { name: '自然光', desc: 'natural ambient lighting', key: { x: 50, y: 10, z: 64 }, fill: { x: 50, y: 50, z: 58 }, back: { x: 50, y: 90, z: 70 }, hair: { x: 50, y: 84, z: 80 } },
-  { name: '伦勃朗', desc: 'Rembrandt (45° key + opposite fill)', key: { x: 25, y: 20, z: 72 }, fill: { x: 75, y: 45, z: 54 }, back: { x: 60, y: 85, z: 70 }, hair: { x: 56, y: 82, z: 82 } },
-  { name: '蝶形光', desc: 'butterfly lighting (front overhead)', key: { x: 50, y: 15, z: 82 }, fill: { x: 35, y: 50, z: 56 }, back: { x: 65, y: 50, z: 60 }, hair: { x: 52, y: 42, z: 84 } },
-  { name: '侧光', desc: 'side lighting (dramatic split)', key: { x: 10, y: 35, z: 68 }, fill: { x: 80, y: 55, z: 54 }, back: { x: 50, y: 85, z: 66 }, hair: { x: 62, y: 80, z: 80 } },
-  { name: '逆光', desc: 'backlit / rim lighting', key: { x: 50, y: 10, z: 62 }, fill: { x: 40, y: 75, z: 56 }, back: { x: 60, y: 75, z: 78 }, hair: { x: 58, y: 70, z: 86 } },
+  { name: '自然光', desc: 'natural ambient lighting', key: { x: 30, y: 22, z: 70 }, fill: { x: 72, y: 44, z: 58 }, back: { x: 62, y: 84, z: 66 }, hair: { x: 40, y: 78, z: 82 } },
+  { name: '伦勃朗', desc: 'Rembrandt (45° key + opposite fill)', key: { x: 24, y: 22, z: 76 }, fill: { x: 74, y: 48, z: 54 }, back: { x: 62, y: 84, z: 68 }, hair: { x: 42, y: 78, z: 84 } },
+  { name: '蝶形光', desc: 'butterfly lighting (front overhead)', key: { x: 50, y: 20, z: 88 }, fill: { x: 36, y: 52, z: 58 }, back: { x: 66, y: 56, z: 62 }, hair: { x: 50, y: 76, z: 84 } },
+  { name: '侧光', desc: 'side lighting (dramatic split)', key: { x: 14, y: 34, z: 72 }, fill: { x: 78, y: 58, z: 56 }, back: { x: 58, y: 82, z: 68 }, hair: { x: 36, y: 76, z: 80 } },
+  { name: '逆光', desc: 'backlit / rim lighting', key: { x: 56, y: 24, z: 64 }, fill: { x: 38, y: 74, z: 58 }, back: { x: 66, y: 74, z: 82 }, hair: { x: 48, y: 70, z: 88 } },
 ];
 
 const FOCAL_OPTIONS = [
@@ -184,9 +292,60 @@ export function initScene(containerId) {
   containerEl = document.getElementById(containerId);
   if (!containerEl) return;
   render();
+  emitScenePreviewState();
 }
 
 /* ============ Recommendation APIs ============ */
+
+export function subscribeSceneState(callback) {
+  if (typeof callback !== 'function') {
+    return () => {};
+  }
+  sceneSubscribers.add(callback);
+  try {
+    callback(getScenePreviewState());
+  } catch {
+    // ignore subscriber errors
+  }
+  return () => {
+    sceneSubscribers.delete(callback);
+  };
+}
+
+export function getScenePreviewState() {
+  const lightStates = {};
+  const lightsList = [];
+  for (const key of lightIds) {
+    const state = getLightStateByKey(key);
+    if (!state) continue;
+    const meta = getLightMetaByKey(key);
+    const snapshot = {
+      ...state,
+      key,
+      id: key,
+      label: meta.label,
+      color: meta.color,
+      slot: meta.order,
+      alias: LEGACY_LIGHT_KEYS.includes(key) ? key : null,
+    };
+    lightStates[key] = snapshot;
+    lightsList.push(snapshot);
+  }
+  return {
+    camera: { ...camera },
+    focalLength,
+    framing,
+    aperture,
+    lightingPreset,
+    lightQuality,
+    colorTemp,
+    timeOfDay,
+    activeCameraPreset,
+    lights: lightStates,
+    lightsList,
+    lightOrder: [...lightIds],
+  };
+}
 
 export function getSceneRecommendationState() {
   return {
@@ -200,9 +359,9 @@ export function getSceneRecommendationState() {
 
 export function getLightTuningState() {
   const result = { lights: {} };
-  for (const key of LIGHT_KEYS) {
-    const light = lights[key];
-    if (!light) continue;
+  const fallback = { on: false, type: '聚光灯', lumens: 1000 };
+  for (const key of LEGACY_LIGHT_KEYS) {
+    const light = resolveLightStateByLegacyAlias(key) || fallback;
     result.lights[key] = {
       on: Boolean(light.on),
       type: light.type,
@@ -269,6 +428,7 @@ export function applySceneRecommendation(reco, { source = 'auto' } = {}) {
 
   if (containerEl) render();
   clearManualSceneChanges();
+  emitScenePreviewState();
   return source === 'auto' || source === 'user-confirmed' ? true : true;
 }
 
@@ -278,7 +438,7 @@ export function applyLightingRecommendation(reco, { source = 'auto' } = {}) {
   let applied = false;
   for (const [rawKey, patch] of Object.entries(reco.lights)) {
     const key = resolveLightKey(rawKey);
-    const current = key ? lights[key] : null;
+    const current = key ? getLightStateByKey(key) : null;
     if (!patch || !current) continue;
 
     if (typeof patch.on === 'boolean') {
@@ -303,6 +463,41 @@ export function applyLightingRecommendation(reco, { source = 'auto' } = {}) {
   if (source === 'auto' || source === 'user-confirmed') {
     clearManualSceneChanges();
   }
+  emitScenePreviewState();
+  return true;
+}
+
+export function applySceneData(data, { markManual = true } = {}) {
+  if (!data || typeof data !== 'object') return false;
+
+  if (data.camera && typeof data.camera === 'object') {
+    camera = {
+      x: safeClamp(data.camera.x, 50, 0, 100),
+      y: safeClamp(data.camera.y, 80, 0, 100),
+      z: safeClamp(data.camera.z ?? data.camera.height, 50, 0, 100),
+    };
+  }
+
+  if (FOCAL_OPTIONS.some((item) => item.value === data.focalLength)) focalLength = data.focalLength;
+  if (FRAMING_OPTIONS.some((item) => item.value === data.framing)) framing = data.framing;
+  if (APERTURE_OPTIONS.some((item) => item.value === data.aperture)) aperture = data.aperture;
+  if (LIGHTING_PRESETS.some((item) => item.name === data.lightingPreset)) lightingPreset = data.lightingPreset;
+  if (LIGHT_QUALITY_OPTIONS.some((item) => item.value === data.lightQuality)) lightQuality = data.lightQuality;
+  if (COLOR_TEMP_OPTIONS.some((item) => item.value === data.colorTemp)) colorTemp = data.colorTemp;
+  timeOfDay = TIME_PRESETS.some((item) => item.name === data.timeOfDay) ? data.timeOfDay : null;
+  activeCameraPreset = CAMERA_PRESETS.some((item) => item.name === data.activeCameraPreset)
+    ? data.activeCameraPreset
+    : null;
+
+  const nextLights = normalizeSceneLights(data);
+  if (nextLights.order.length > 0) {
+    lightIds = nextLights.order;
+    lights = nextLights.lights;
+  }
+
+  manualSceneChanged = Boolean(markManual);
+  if (containerEl) render();
+  emitScenePreviewState();
   return true;
 }
 
@@ -317,13 +512,16 @@ export function getSceneData() {
   const timeOpt = TIME_PRESETS.find((o) => o.name === timeOfDay);
 
   const lightDescs = {};
-  for (const [key, meta] of Object.entries(LIGHT_META)) {
-    const l = lights[key];
+  for (const key of lightIds) {
+    const l = getLightStateByKey(key);
+    if (!l) continue;
+    const meta = getLightMetaByKey(key);
     const typeInfo = LIGHT_TYPES.find((t) => t.value === l.type);
     const sLm = l.on ? calcSubjectLumens(l) : 0;
     lightDescs[meta.en] = {
-      alias: key,
+      alias: LEGACY_LIGHT_KEYS.includes(key) ? key : null,
       label: meta.label,
+      id: key,
       on: l.on,
       type: l.type,
       typeEn: typeInfo?.en || l.type,
@@ -355,6 +553,37 @@ export function getSceneData() {
 
 export function destroyScene() {
   if (containerEl) containerEl.innerHTML = '';
+  emitScenePreviewState();
+}
+
+function normalizeSceneLights(data) {
+  const rawList = Array.isArray(data.lightsList)
+    ? data.lightsList
+    : Object.entries(data.lights || {}).map(([key, value]) => ({ ...value, key, id: value?.id || key }));
+  const order = [];
+  const nextLights = {};
+
+  rawList.slice(0, MAX_LIGHT_COUNT).forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const fallbackKey = index < BASE_LIGHT_KEYS.length ? BASE_LIGHT_KEYS[index] : `light${index + 1}`;
+    const key = String(item.id || item.key || fallbackKey);
+    if (!key || order.includes(key)) return;
+    order.push(key);
+    nextLights[key] = {
+      x: safeClamp(item.x, 50, 0, 100),
+      y: safeClamp(item.y, 50, 0, 100),
+      z: safeClamp(item.z, 60, 0, 100),
+      on: typeof item.on === 'boolean' ? item.on : true,
+      type: LIGHT_TYPES.some((type) => type.value === item.type) ? item.type : '聚光灯',
+      watts: safeClamp(item.watts, 100, 25, 2000),
+      lumens: safeClamp(item.lumens, 1000, 100, 100000),
+    };
+  });
+
+  if (order.length === 0) {
+    return { order: [], lights: {} };
+  }
+  return { order, lights: nextLights };
 }
 
 /* ============ Render ============ */
@@ -375,13 +604,14 @@ function render() {
   viewsRow.appendChild(sideView);
 
   const legend = el('div', 'scene-legend');
+  const legendItemsHtml = lightIds.map((key) => {
+    const meta = getLightMetaByKey(key);
+    return `<span class="scene-legend-item"><span class="scene-legend-dot" style="background:${meta.color};box-shadow:0 0 4px ${meta.color}66"></span>${meta.label}</span>`;
+  }).join('');
   legend.innerHTML = `
     <div class="scene-legend-items">
       <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-cam"></span>相机</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-key"></span>光源1</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-fill"></span>光源2</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-back"></span>光源3</span>
-      <span class="scene-legend-item"><span class="scene-legend-dot scene-legend-hair"></span>光源4</span>
+      ${legendItemsHtml}
     </div>
     <div class="scene-legend-axes">
       <span>俯视: ←左右→ ↑远↓近</span>
@@ -423,7 +653,8 @@ function render() {
   controls.appendChild(lightDescEl);
 
   const lightSection = el('div', 'light-cards');
-  for (const key of LIGHT_KEYS) {
+  lightSection.appendChild(createLightActionsBar());
+  for (const key of lightIds) {
     lightSection.appendChild(createLightCard(key));
   }
 
@@ -443,13 +674,32 @@ function render() {
   groups.appendChild(createSceneFold('lights', '灯光卡片', lightSection, false));
   groups.appendChild(createSceneFold('controls', '预设与全局参数', controls, false));
   containerEl.appendChild(groups);
+  emitScenePreviewState();
 }
 
 /* ============ Light Cards ============ */
 
+function createLightActionsBar() {
+  const row = el('div', 'scene-light-actions');
+  const count = el('span', 'scene-light-count');
+  count.textContent = `光源数量 ${lightIds.length}/${MAX_LIGHT_COUNT}`;
+  row.appendChild(count);
+
+  const addBtn = el('button', 'scene-light-action-btn');
+  addBtn.type = 'button';
+  addBtn.textContent = '新增光源';
+  addBtn.disabled = lightIds.length >= MAX_LIGHT_COUNT;
+  addBtn.addEventListener('click', () => {
+    addLight();
+  });
+  row.appendChild(addBtn);
+  return row;
+}
+
 function createLightCard(key) {
-  const l = lights[key];
-  const meta = LIGHT_META[key];
+  const l = getLightStateByKey(key);
+  const meta = getLightMetaByKey(key);
+  if (!l) return el('div', 'light-card');
 
   const card = el('div', `light-card light-card-${key} ${l.on ? '' : 'light-card-off'}`);
   card.dataset.lightKey = key;
@@ -461,8 +711,10 @@ function createLightCard(key) {
   toggleInput.type = 'checkbox';
   toggleInput.checked = l.on;
   toggleInput.addEventListener('change', () => {
-    lights[key].on = toggleInput.checked;
-    card.classList.toggle('light-card-off', !lights[key].on);
+    const state = getLightStateByKey(key);
+    if (!state) return;
+    state.on = toggleInput.checked;
+    card.classList.toggle('light-card-off', !state.on);
     updateSubjectLumens(key, card);
     syncEntityViews('light', key);
     updateSceneCoordReadout();
@@ -477,6 +729,15 @@ function createLightCard(key) {
   labelEl.textContent = meta.label;
   labelEl.style.setProperty('--light-accent', meta.color);
   header.appendChild(labelEl);
+
+  const removeBtn = el('button', 'scene-light-remove-btn');
+  removeBtn.type = 'button';
+  removeBtn.textContent = '删除';
+  removeBtn.disabled = lightIds.length <= MIN_LIGHT_COUNT;
+  removeBtn.addEventListener('click', () => {
+    removeLight(key);
+  });
+  header.appendChild(removeBtn);
 
   const subjEl = el('span', 'light-subject-lm');
   subjEl.id = `subj-lm-${key}`;
@@ -504,7 +765,9 @@ function createLightCard(key) {
     typeSelect.appendChild(opt);
   });
   typeSelect.addEventListener('change', () => {
-    lights[key].type = typeSelect.value;
+    const state = getLightStateByKey(key);
+    if (!state) return;
+    state.type = typeSelect.value;
     syncEntityCoverage('light', key);
     markManualSceneChange();
   });
@@ -533,10 +796,12 @@ function createLightCard(key) {
 
   wattsSlider.addEventListener('input', () => {
     const w = Number(wattsSlider.value);
-    lights[key].watts = w;
-    lights[key].lumens = Math.round(w * 100);
+    const state = getLightStateByKey(key);
+    if (!state) return;
+    state.watts = w;
+    state.lumens = Math.round(w * 100);
     wattsVal.textContent = `${w}W`;
-    lumensVal.textContent = `${formatLm(lights[key].lumens)} lm`;
+    lumensVal.textContent = `${formatLm(state.lumens)} lm`;
     updateSubjectLumens(key, card);
     syncEntityCoverage('light', key);
     markManualSceneChange();
@@ -564,8 +829,10 @@ function createLightCard(key) {
 
   lumensInput.addEventListener('change', () => {
     const v = clamp(Number(lumensInput.value), 100, 100000);
-    lights[key].lumens = v;
-    lights[key].watts = clamp(Math.round(v / 100), 25, 2000);
+    const state = getLightStateByKey(key);
+    if (!state) return;
+    state.lumens = v;
+    state.watts = clamp(Math.round(v / 100), 25, 2000);
     lumensInput.value = v;
     lumensVal.textContent = `${formatLm(v)} lm`;
     updateSubjectLumens(key, card);
@@ -602,7 +869,7 @@ function createView(label, viewId) {
 function placeEntities() {
   for (const viewId of ['top', 'front', 'side']) {
     addEntityToView('camera', null, viewId);
-    for (const key of LIGHT_KEYS) {
+    for (const key of lightIds) {
       addEntityToView('light', key, viewId);
     }
   }
@@ -614,13 +881,16 @@ function addEntityToView(kind, key, viewId) {
 
   const coverageEl = el('div', 'scene-coverage');
   coverageEl.dataset.entity = entityId(kind, key);
-  coverageEl.dataset.type = kind === 'camera' ? 'camera' : key;
+  coverageEl.dataset.type = kind === 'camera' ? 'camera' : (BASE_LIGHT_KEYS.includes(key) ? key : 'dynamic');
   viewEl.appendChild(coverageEl);
 
   const indicator = el('div', kind === 'camera' ? 'scene-camera' : 'scene-light');
   indicator.dataset.id = entityId(kind, key);
   if (kind === 'light') {
-    indicator.setAttribute('data-type', key);
+    const meta = getLightMetaByKey(key);
+    indicator.setAttribute('data-type', BASE_LIGHT_KEYS.includes(key) ? key : 'dynamic');
+    indicator.style.background = meta.color;
+    indicator.style.boxShadow = `0 0 10px ${meta.color}77`;
     indicator.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
   } else {
     indicator.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>';
@@ -693,7 +963,8 @@ function syncEntityViews(kind, key) {
       indicator.style.left = `${pos.x}%`;
       indicator.style.top = `${pos.y}%`;
       if (kind === 'light') {
-        indicator.style.opacity = lights[key].on ? '1' : '0.25';
+        const light = getLightStateByKey(key);
+        indicator.style.opacity = light?.on ? '1' : '0.25';
       }
     }
 
@@ -733,7 +1004,7 @@ function syncEntityCoverage(kind, key) {
 
 function syncAllCoverage() {
   syncEntityCoverage('camera', null);
-  for (const key of LIGHT_KEYS) syncEntityCoverage('light', key);
+  for (const key of lightIds) syncEntityCoverage('light', key);
 }
 
 function setEntityStateByView(kind, key, viewId, sx, sy) {
@@ -754,7 +1025,7 @@ function setEntityStateByView(kind, key, viewId, sx, sy) {
     return;
   }
 
-  const light = lights[key];
+  const light = getLightStateByKey(key);
   if (!light) return;
   if (viewId === 'top') {
     light.x = sx;
@@ -772,7 +1043,7 @@ function setEntityStateByView(kind, key, viewId, sx, sy) {
 }
 
 function getEntityScreenPosition(kind, key, viewId) {
-  const state = kind === 'camera' ? camera : lights[key];
+  const state = kind === 'camera' ? camera : getLightStateByKey(key);
   if (!state) return { x: 50, y: 50 };
 
   if (viewId === 'top') return { x: state.x, y: state.y };
@@ -784,36 +1055,48 @@ function getCoverageConfig(kind, key, viewId) {
   const dir = getDirectionAngleDeg(kind, key, viewId);
   if (kind === 'camera') {
     const spread = FOCAL_CAMERA_ANGLE[focalLength] || 62;
-    const radius = clamp(22 + spread * 0.18, 24, 46);
+    const radius = clamp(15 + spread * 0.1, 16, 32);
     return {
       radius,
       angleDeg: dir,
-      halfSpreadPct: clamp(spread / 2.4, 12, 48),
-      opacity: 0.16,
+      halfSpreadPct: clamp(spread / 3.8, 8, 28),
+      opacity: 0.12,
       blurPx: lightQuality === '柔光' ? 2 : 1,
       color: 'rgba(255, 143, 171, var(--coverage-opacity))',
       visible: true,
     };
   }
 
-  const light = lights[key];
+  const light = getLightStateByKey(key);
+  if (!light) {
+    return {
+      radius: 10,
+      angleDeg: dir,
+      halfSpreadPct: 12,
+      opacity: 0.04,
+      blurPx: 1,
+      color: 'rgba(200,200,200,var(--coverage-opacity))',
+      visible: false,
+    };
+  }
   const spread = LIGHT_BEAM_ANGLE[light.type] || 60;
-  const radius = clamp(14 + Math.sqrt(light.lumens) / 7.8, 14, 44);
+  const radius = clamp(8 + Math.sqrt(light.lumens) / 15, 9, 30);
   const qualitySoft = lightQuality === '柔光';
+  const meta = getLightMetaByKey(key);
   return {
     radius,
     angleDeg: dir,
-    halfSpreadPct: clamp(spread / 2.2, 10, 48),
-    opacity: light.on ? 0.19 : 0.07,
+    halfSpreadPct: clamp(spread / 3.6, 7, 30),
+    opacity: light.on ? 0.14 : 0.04,
     blurPx: qualitySoft ? 3 : 1,
-    color: `color-mix(in srgb, ${LIGHT_META[key].color} 70%, transparent)`,
+    color: `color-mix(in srgb, ${meta.color} 70%, transparent)`,
     visible: true,
   };
 }
 
 function getDirectionAngleDeg(kind, key, viewId) {
   const target = { x: 50, y: 50, z: 50 };
-  const source = kind === 'camera' ? camera : lights[key];
+  const source = kind === 'camera' ? camera : getLightStateByKey(key);
   if (!source) return 0;
 
   let dx = 0;
@@ -917,7 +1200,8 @@ function calcSubjectLumens(light) {
 }
 
 function updateSubjectLumens(key, card) {
-  const l = lights[key];
+  const l = getLightStateByKey(key);
+  if (!l) return;
   const lumEl = card.querySelector(`#subj-lm-${key}`);
   if (!lumEl) return;
   if (l.on) {
@@ -980,6 +1264,11 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
+function safeClamp(value, fallback, min, max) {
+  const n = Number(value);
+  return Number.isFinite(n) ? clamp(n, min, max) : fallback;
+}
+
 function updateCamDesc(desc) {
   const dom = containerEl?.querySelector('#cam-desc');
   if (dom) dom.textContent = desc;
@@ -997,9 +1286,10 @@ function updateSceneCoordReadout() {
   const cameraTop = `相机俯视 X${Math.round(camera.x)} Y${Math.round(camera.y)}`;
   const cameraFront = `相机正视 X${Math.round(camera.x)} Z${Math.round(camera.z)}`;
   const cameraSide = `相机侧视 Y${Math.round(camera.y)} Z${Math.round(camera.z)}`;
-  const lightRows = LIGHT_KEYS.map((key) => {
-    const light = lights[key];
-    const label = LIGHT_META[key].label;
+  const lightRows = lightIds.map((key) => {
+    const light = getLightStateByKey(key);
+    const label = getLightMetaByKey(key).label;
+    if (!light) return `${label}: 缺失`;
     if (!light.on) return `${label}: 关闭`;
     return `${label}: X${Math.round(light.x)} Y${Math.round(light.y)} Z${Math.round(light.z)}`;
   });
@@ -1118,16 +1408,38 @@ function applyLightingPresetByName(name) {
   const preset = LIGHTING_PRESETS.find((item) => item.name === name);
   if (!preset) return false;
   lightingPreset = preset.name;
-  lights.key = { ...lights.key, ...preset.key };
-  lights.fill = { ...lights.fill, ...preset.fill };
-  lights.back = { ...lights.back, ...preset.back };
-  lights.hair = { ...lights.hair, ...preset.hair };
+  const keyMap = getLegacyLightKeyMap();
+  if (keyMap.key && lights[keyMap.key]) lights[keyMap.key] = { ...lights[keyMap.key], ...preset.key };
+  if (keyMap.fill && lights[keyMap.fill]) lights[keyMap.fill] = { ...lights[keyMap.fill], ...preset.fill };
+  if (keyMap.back && lights[keyMap.back]) lights[keyMap.back] = { ...lights[keyMap.back], ...preset.back };
+  if (keyMap.hair && lights[keyMap.hair]) lights[keyMap.hair] = { ...lights[keyMap.hair], ...preset.hair };
   return true;
 }
 
 function resolveLightKey(rawKey) {
   const token = normalizeToken(rawKey);
-  return LIGHT_KEY_ALIASES[token] || null;
+  const legacy = LIGHT_KEY_ALIASES[token] || null;
+  if (legacy) {
+    const map = getLegacyLightKeyMap();
+    return map[legacy] || null;
+  }
+  const idDirect = lightIds.find((id) => normalizeToken(id) === token);
+  if (idDirect) return idDirect;
+  const match = token.match(/^light(\d{1,2})$/);
+  if (match) {
+    const idx = Number(match[1]) - 1;
+    if (idx >= 0 && idx < lightIds.length) {
+      return lightIds[idx];
+    }
+  }
+  const zhMatch = token.match(/^光源(\d{1,2})$/);
+  if (zhMatch) {
+    const idx = Number(zhMatch[1]) - 1;
+    if (idx >= 0 && idx < lightIds.length) {
+      return lightIds[idx];
+    }
+  }
+  return null;
 }
 
 function normalizeToken(value) {
@@ -1138,6 +1450,19 @@ function normalizeToken(value) {
     .replace(/[，,、。.!?;；'"`~]/g, '');
 }
 
+function emitScenePreviewState() {
+  if (sceneSubscribers.size === 0) return;
+  const snapshot = getScenePreviewState();
+  for (const callback of sceneSubscribers) {
+    try {
+      callback(snapshot);
+    } catch {
+      // ignore subscriber errors
+    }
+  }
+}
+
 function markManualSceneChange() {
   manualSceneChanged = true;
+  emitScenePreviewState();
 }

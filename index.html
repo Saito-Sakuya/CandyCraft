@@ -91,6 +91,14 @@
         <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
         <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
       </symbol>
+      <symbol id="icon-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="6" x2="20" y2="6"/>
+        <circle cx="9" cy="6" r="2"/>
+        <line x1="4" y1="12" x2="20" y2="12"/>
+        <circle cx="15" cy="12" r="2"/>
+        <line x1="4" y1="18" x2="20" y2="18"/>
+        <circle cx="11" cy="18" r="2"/>
+      </symbol>
     </defs>
   </svg>
 
@@ -122,31 +130,52 @@
 
       <div id="custom-config-section" class="settings-mode-section hidden">
         <div class="form-group">
-          <label for="custom-api-base-url">API Base URL</label>
-          <input type="text" id="custom-api-base-url" placeholder="https://api.openai.com/v1">
-        </div>
-        <div class="form-group">
-          <label for="custom-api-key">API Key</label>
-          <div class="input-with-toggle">
-            <input type="password" id="custom-api-key" placeholder="sk-...">
-            <button id="toggle-custom-key-visibility" class="btn-icon" title="显示/隐藏">
+          <label>结构分析角色（structure）</label>
+          <input type="text" id="role-structure-base-url" placeholder="https://api.openai.com/v1">
+          <div class="input-with-toggle" style="margin-top:6px">
+            <input type="password" id="role-structure-api-key" placeholder="sk-...">
+            <button id="toggle-role-structure-key-visibility" class="btn-icon" title="显示/隐藏">
               <svg width="18" height="18"><use href="#icon-eye"/></svg>
             </button>
           </div>
+          <input type="text" id="role-structure-model" placeholder="例如: gpt-4.1-mini" style="margin-top:6px">
         </div>
         <div class="form-group">
-          <label for="custom-model-name">模型名称</label>
-          <input type="text" id="custom-model-name" placeholder="例如: gpt-4o / gpt-4.1">
+          <label>灯光细化角色（lighting）</label>
+          <input type="text" id="role-lighting-base-url" placeholder="https://api.openai.com/v1">
+          <div class="input-with-toggle" style="margin-top:6px">
+            <input type="password" id="role-lighting-api-key" placeholder="sk-...">
+            <button id="toggle-role-lighting-key-visibility" class="btn-icon" title="显示/隐藏">
+              <svg width="18" height="18"><use href="#icon-eye"/></svg>
+            </button>
+          </div>
+          <input type="text" id="role-lighting-model" placeholder="例如: gpt-4o-mini" style="margin-top:6px">
         </div>
         <div class="form-group">
+          <label>归一化角色（normalize）</label>
+          <input type="text" id="role-normalize-base-url" placeholder="https://api.openai.com/v1">
+          <div class="input-with-toggle" style="margin-top:6px">
+            <input type="password" id="role-normalize-api-key" placeholder="sk-...">
+            <button id="toggle-role-normalize-key-visibility" class="btn-icon" title="显示/隐藏">
+              <svg width="18" height="18"><use href="#icon-eye"/></svg>
+            </button>
+          </div>
+          <input type="text" id="role-normalize-model" placeholder="例如: gpt-4.1-mini" style="margin-top:6px">
+        </div>
+        <div class="form-group">
+          <p style="margin:0 0 6px;font-size:0.82rem;color:var(--color-text-secondary);line-height:1.5">
+            模型建议：`structure` 用 Pro，`lighting` 用 Pro（或 Flash + 失败重试 Pro），`normalize` 用 Flash。
+          </p>
           <p style="margin:0;font-size:0.82rem;color:var(--color-text-secondary);line-height:1.5">
             自定义模式会在浏览器中直连你的端点，请确保上游允许浏览器跨域请求（CORS）。
           </p>
         </div>
       </div>
       <div class="candy-stripe-bar"></div>
-      <button id="test-connection" class="btn-secondary btn-full">测试连接</button>
-      <button id="save-settings" class="btn-primary btn-full">保存设置</button>
+      <div class="settings-actions">
+        <button id="test-connection" class="btn-secondary btn-full">测试连接</button>
+        <button id="save-settings" class="btn-primary btn-full">保存设置</button>
+      </div>
     </div>
   </aside>
 
@@ -179,6 +208,26 @@
     </div>
   </div>
 
+  <!-- ========== Analysis Form Dialog (Iterate / Modify Dimension) ========== -->
+  <div id="analysis-form-overlay" class="overlay analysis-form-overlay">
+    <div class="analysis-form-dialog" role="dialog" aria-modal="true" aria-labelledby="analysis-form-title">
+      <h3 id="analysis-form-title">分析设置</h3>
+      <p id="analysis-form-desc" class="analysis-form-desc"></p>
+      <div id="analysis-form-dimension-group" class="analysis-form-group hidden">
+        <label for="analysis-form-dimension-select">目标维度</label>
+        <select id="analysis-form-dimension-select" class="analysis-form-select"></select>
+      </div>
+      <div class="analysis-form-group">
+        <label id="analysis-form-input-label" for="analysis-form-input">输入说明</label>
+        <textarea id="analysis-form-input" class="analysis-form-textarea" rows="5"></textarea>
+      </div>
+      <div class="analysis-form-actions">
+        <button id="analysis-form-cancel" class="btn-secondary">取消</button>
+        <button id="analysis-form-confirm" class="btn-primary">确认</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ========== Header ========== -->
   <header class="app-header">
     <div class="header-left">
@@ -188,9 +237,16 @@
     </div>
     <div class="header-center">
       <h1 class="brand">Candy Craft</h1>
-      <p class="brand-subtitle">AI 提示词可视化优化</p>
+      <div class="brand-subtitle-row">
+        <p class="brand-subtitle">AI 提示词可视化优化</p>
+        <span id="app-version" class="app-version">BetaA.a.0</span>
+      </div>
     </div>
     <div class="header-right">
+      <div class="ui-mode-switch" role="group" aria-label="界面模式">
+        <button type="button" class="ui-mode-btn active" data-ui-mode="candy" aria-pressed="true">Candy</button>
+        <button type="button" class="ui-mode-btn" data-ui-mode="pro" aria-pressed="false">Pro</button>
+      </div>
       <div id="style-toggle"></div>
       <button id="btn-theme-toggle" class="btn-icon" title="切换到夜间模式">
         <!-- Icon injected by theme.js -->
@@ -219,6 +275,22 @@
           <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
           分析提示词
         </button>
+      </div>
+
+      <!-- Poster Mode Entry Card -->
+      <div id="poster-entry-card" class="card poster-entry-card fade-in">
+        <h2 class="card-title">
+          <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-sky)"><use href="#icon-frame"/></svg>
+          海报模式工作区
+        </h2>
+        <p class="poster-entry-desc">
+          像专业设计软件一样，以画板为主视图创作。进入后参数、布光、优化流程统一收纳到右侧菜单。
+        </p>
+        <button id="btn-poster-mode" class="btn-secondary btn-full">
+          <svg width="16" height="16"><use href="#icon-frame"/></svg>
+          进入海报模式
+        </button>
+        <p id="poster-mode-status" class="poster-mode-status hidden">当前模式：海报工作区已启用</p>
       </div>
 
       <!-- Guide Cards (visible on page load, hidden on analyze) -->
@@ -251,7 +323,12 @@
 
       <!-- Presets Card (hidden until analysis) -->
       <div id="presets-section" class="card" style="display:none">
-        <h2 class="card-title">预设方案</h2>
+        <div class="card-header">
+          <h2 class="card-title">预设方案</h2>
+          <div class="card-actions card-actions-compact">
+            <button id="btn-refresh-presets" class="btn-secondary btn-sm">刷新预设</button>
+          </div>
+        </div>
         <div id="presets-container" class="presets-row"></div>
       </div>
 
@@ -259,17 +336,16 @@
       <div id="sliders-section" class="card" style="display:none">
         <div class="card-header">
           <h2 class="card-title">调节维度</h2>
+        </div>
+        <div class="slider-action-row">
+          <button id="btn-refresh-dimensions" class="btn-secondary btn-sm">刷新维度</button>
+          <button id="btn-replace-dimension" class="btn-secondary btn-sm">修改</button>
           <button id="btn-reset-sliders" class="btn-text">
             <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:4px"><use href="#icon-reset"/></svg>
             重置
           </button>
         </div>
         <div id="sliders-container"></div>
-        <div class="candy-stripe-bar"></div>
-        <button id="btn-optimize" class="btn-primary btn-full" style="margin-top:var(--space-md)">
-          <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
-          优化提示词
-        </button>
       </div>
 
     </section>
@@ -284,7 +360,11 @@
             <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-pink)"><use href="#icon-users"/></svg>
             画面布局
           </h2>
-          <div id="composition-container" class="comp-selector"></div>
+          <div class="canvas-header-tools">
+            <button id="btn-open-poster-inspector" class="btn-secondary btn-sm poster-mobile-inspector-btn hidden">
+              参数
+            </button>
+          </div>
         </div>
 
         <!-- Board + Layer Panel -->
@@ -300,6 +380,13 @@
             <span style="font-size:0.7rem;color:var(--color-text-tertiary)">拖拽移动与缩放 / 点击编辑 / Ctrl+点击穿透遮挡 / Alt+点击右侧标签进入聚焦编辑</span>
           </div>
         </div>
+        <div id="composition-toolbar" class="composition-toolbar">
+          <div id="composition-container" class="comp-selector"></div>
+        </div>
+        <div id="template-section" class="template-section">
+          <h3 class="template-section-title">模板</h3>
+          <div id="template-container" class="template-container"></div>
+        </div>
       </div>
 
       <!-- Scene Three-View Card -->
@@ -308,7 +395,13 @@
           <svg width="18" height="18" style="display:inline;vertical-align:-3px;margin-right:6px;color:var(--color-candy-sky)"><use href="#icon-camera"/></svg>
           相机与布光
         </h2>
-        <div id="scene-container"></div>
+        <p class="module-note">说明：相机与布光会转换为镜头、光源和氛围描述；不同生图模型可能只近似遵循，最终以模型和平台参数支持为准。</p>
+        <div class="scene-dual-layout">
+          <div id="scene-3d-preview">
+            <div class="scene-3d-status">3D 预览将在分析后加载</div>
+          </div>
+          <div id="scene-container"></div>
+        </div>
       </div>
 
     </section>
@@ -319,16 +412,43 @@
       <!-- Radar Chart Card -->
       <div id="radar-section" class="card" style="display:none">
         <h2 class="card-title">维度雷达图</h2>
+        <p class="module-note">说明：维度用于指导优化倾向，不是生图模型的硬参数；模型可能按语义权重近似执行。</p>
         <div class="radar-wrapper">
           <canvas id="radar-chart"></canvas>
         </div>
       </div>
 
+      <div id="analysis-action-section" class="analysis-action-section" style="display:none">
+        <div class="candy-stripe-bar"></div>
+        <div class="analysis-action-list">
+          <div class="analysis-action-item">
+            <div class="analysis-action-copy">
+              <strong>优化提示词</strong>
+              <span>基于当前画板、构图尺寸、维度与布光，生成最终可用的生图提示词。</span>
+            </div>
+            <button id="btn-optimize" class="btn-primary btn-full">
+              <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
+              优化提示词
+            </button>
+          </div>
+          <div class="analysis-action-item">
+            <div class="analysis-action-copy">
+              <strong>迭代分析</strong>
+              <span>带着当前结果继续提出修改要求，重新生成维度、预设与画面建议。</span>
+            </div>
+            <button id="btn-iterate-analysis" class="btn-primary btn-full">
+              <svg width="16" height="16"><use href="#icon-sparkle"/></svg>
+              迭代分析
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Result Card -->
       <div id="result-section" class="card" style="display:none">
-        <div class="card-header">
+        <div class="card-header result-card-header">
           <h2 class="card-title">优化结果</h2>
-          <div class="card-actions">
+          <div class="card-actions result-header-actions">
             <button id="btn-copy" class="btn-secondary btn-sm">
               <svg width="14" height="14" style="display:inline;vertical-align:-2px;margin-right:3px"><use href="#icon-copy"/></svg>
               复制
@@ -353,6 +473,68 @@
       </div>
 
     </section>
+
+    <aside id="poster-floating-panel" class="poster-floating-panel hidden" aria-label="海报模式浮动面板">
+      <div class="poster-floating-header">
+        <h2 id="poster-floating-title">场景控制</h2>
+        <button id="btn-close-poster-floating" class="btn-icon" title="关闭浮动面板">
+          <svg width="20" height="20"><use href="#icon-close"/></svg>
+        </button>
+      </div>
+      <div class="poster-floating-body">
+        <div id="poster-floating-scene" class="poster-floating-content poster-floating-scene hidden">
+          <div id="poster-slot-floating-scene" class="poster-floating-slot"></div>
+        </div>
+        <div id="poster-floating-dimensions" class="poster-floating-content poster-floating-dimensions hidden">
+          <div id="poster-slot-floating-dimensions-controls" class="poster-floating-slot"></div>
+          <div id="poster-slot-floating-dimensions-radar" class="poster-floating-slot"></div>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="poster-inspector" class="poster-inspector hidden" aria-label="海报模式参数面板">
+      <div class="poster-inspector-header">
+        <h2>参数与流程</h2>
+        <div class="poster-inspector-header-actions">
+          <button id="btn-exit-poster-workspace" class="btn-secondary btn-sm">退出海报模式</button>
+          <button id="btn-close-poster-inspector" class="btn-icon" title="关闭参数页">
+            <svg width="20" height="20"><use href="#icon-close"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="poster-inspector-body" class="poster-inspector-body">
+        <nav id="poster-floating-tools" class="poster-floating-tools hidden" aria-label="海报模式快捷工具">
+          <button id="btn-poster-float-scene" class="poster-tool-btn" type="button" data-poster-panel="scene">
+            <svg width="16" height="16"><use href="#icon-camera"/></svg>
+            <span>场景控制</span>
+          </button>
+          <button id="btn-poster-float-dimensions" class="poster-tool-btn" type="button" data-poster-panel="dimensions">
+            <svg width="16" height="16"><use href="#icon-sliders"/></svg>
+            <span>维度雷达</span>
+          </button>
+        </nav>
+        <details class="poster-group poster-group-workflow" open>
+          <summary>工作流</summary>
+          <div id="poster-slot-workflow" class="poster-slot"></div>
+        </details>
+        <details class="poster-group poster-group-composition" open>
+          <summary>构图尺寸</summary>
+          <div id="poster-slot-composition" class="poster-slot"></div>
+        </details>
+        <details class="poster-group poster-group-layers">
+          <summary>图层</summary>
+          <div id="poster-slot-layers" class="poster-slot"></div>
+        </details>
+        <details class="poster-group poster-group-templates">
+          <summary>模板</summary>
+          <div id="poster-slot-templates" class="poster-slot"></div>
+        </details>
+        <details class="poster-group poster-group-result" open>
+          <summary>结果输出</summary>
+          <div id="poster-slot-result" class="poster-slot"></div>
+        </details>
+      </div>
+    </aside>
   </main>
 
   <!-- Application Scripts (ES Modules) -->

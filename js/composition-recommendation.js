@@ -56,13 +56,24 @@ function normalizeToken(value) {
 export function normalizeCompositionRatio(rawValue) {
   if (rawValue === null || rawValue === undefined) return null;
   const text = String(rawValue).trim().replace(/：/g, ':');
-  const m = text.match(/(\d{1,3})\s*[:xX×]\s*(\d{1,3})/);
+  const decimal = text.match(/(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)/);
+  if (decimal && (decimal[1].includes('.') || decimal[2].includes('.'))) {
+    const left = Number.parseFloat(decimal[1]);
+    const right = Number.parseFloat(decimal[2]);
+    if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) return null;
+    const w = Math.round(left * 1000);
+    const h = Math.round(right * 1000);
+    if (w < 1 || h < 1 || w > 9999 || h > 9999) return null;
+    return `${w}:${h}`;
+  }
+
+  const m = text.match(/(\d{1,4})\s*[:xX×]\s*(\d{1,4})/);
   if (!m) return null;
 
   const w = Number.parseInt(m[1], 10);
   const h = Number.parseInt(m[2], 10);
   if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
-  if (w < 1 || h < 1 || w > 64 || h > 64) return null;
+  if (w < 1 || h < 1 || w > 9999 || h > 9999) return null;
 
   return `${w}:${h}`;
 }
@@ -141,7 +152,7 @@ export function inferCompositionRecommendationFromPrompt(prompt) {
   if (!reco.ratio && reco.orientation) {
     const orientationDefaults = {
       landscape: '16:9',
-      portrait: '9:16',
+      portrait: '2:3',
       square: '1:1',
     };
     reco.ratio = orientationDefaults[reco.orientation] || '16:9';

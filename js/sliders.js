@@ -151,8 +151,39 @@ export function destroySliders() {
  * Update the slider track fill gradient based on current value
  */
 function updateTrackFill(input, value, min, max) {
+  if (!input) return;
   const percent = ((value - min) / (max - min)) * 100;
-  input.style.background = `linear-gradient(to right, #FF8FAB 0%, #C3A6FF ${percent}%, #F0E6F0 ${percent}%)`;
+  const { start, fill, empty } = getTrackColors();
+  input.style.background = `linear-gradient(to right, ${start} 0%, ${fill} ${percent}%, ${empty} ${percent}%)`;
+}
+
+/**
+ * Refresh inline range backgrounds after Candy/Pro mode changes.
+ */
+export function refreshSliderThemes() {
+  if (!containerElement) return;
+
+  currentDimensions.forEach((dim, i) => {
+    const input = containerElement.querySelector(`input[data-index="${i}"]`);
+    updateTrackFill(input, dim.value, dim.min, dim.max);
+  });
+}
+
+function getTrackColors() {
+  const isPro = document.documentElement.dataset.uiMode === 'pro';
+  if (isPro) {
+    return {
+      start: 'var(--color-text-secondary)',
+      fill: 'var(--color-text-primary)',
+      empty: 'var(--color-border)',
+    };
+  }
+
+  return {
+    start: 'var(--color-candy-pink)',
+    fill: 'var(--color-candy-lavender)',
+    empty: 'var(--color-border)',
+  };
 }
 
 /**

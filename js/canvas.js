@@ -19,10 +19,16 @@ let editPopupEl = null;
 let dragState = null;
 let outsideHandler = null;  // click-outside listener ref
 let layerFilter = 'all';   // 'all' | 'foreground' | 'background'
+let boardPointerDownHandler = null;
+let boardKeydownHandler = null;
 let focusMode = {
   active: false,
   targetId: null,
   snapshot: null,
+};
+let canvasNegativePrompt = {
+  enabled: false,
+  text: '',
 };
 
 const DRAG_START_THRESHOLD_PX = 4;
@@ -58,7 +64,42 @@ export function initCanvas(boardId, layerPanelId, data) {
   layerPanelEl = document.getElementById(layerPanelId);
   if (!boardEl) return;
 
-  elements = (data || []).map((e, i) => ({
+  const source = Array.isArray(data) ? { elements: data, links: [] } : (data || {});
+  elements = normalizeElements(source.elements || []);
+  links = normalizeLinks(source.links || []);
+  canvasNegativePrompt = normalizeNegativePrompt(source.canvasNegativePrompt);
+  selectedId = null;
+  linkMode = false;
+  focusMode = {
+    active: false,
+    targetId: null,
+    snapshot: null,
+  };
+
+  render();
+  setupBoardEvents();
+}
+
+export function applyCanvasData(data) {
+  if (!boardEl) return false;
+  const source = data && typeof data === 'object' ? data : {};
+  elements = normalizeElements(source.elements || []);
+  links = normalizeLinks(source.links || []);
+  canvasNegativePrompt = normalizeNegativePrompt(source.canvasNegativePrompt);
+  selectedId = null;
+  linkMode = false;
+  linkFromId = null;
+  focusMode = {
+    active: false,
+    targetId: null,
+    snapshot: null,
+  };
+  render();
+  return true;
+}
+
+function normalizeElements(rawElements) {
+  return (Array.isArray(rawElements) ? rawElements : []).map((e, i) => ({
     id: e.id || generateId(),
     type: e.type || 'character',
     layer: e.layer || 'foreground',
@@ -72,18 +113,44 @@ export function initCanvas(boardId, layerPanelId, data) {
     h: e.h ?? e.size?.h ?? (e.type === 'object' ? 18 : 28),
     zIndex: e.zIndex ?? i,
     focusPoint: e.focusPoint || null,
+    textPassthrough: normalizeTextPassthrough(e.textPassthrough),
+    negativePrompt: normalizeNegativePrompt(e.negativePrompt),
   }));
-  links = [];
-  selectedId = null;
-  linkMode = false;
-  focusMode = {
-    active: false,
-    targetId: null,
-    snapshot: null,
-  };
+}
 
-  render();
-  setupBoardEvents();
+function normalizeTextPassthrough(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const text = String(source.text || '');
+  const typographyHint = String(source.typographyHint || '');
+  return {
+    enabled: Boolean(source.enabled && text.trim()),
+    text,
+    typographyHint,
+  };
+}
+
+function normalizeNegativePrompt(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const text = String(source.text || '');
+  return {
+    enabled: Boolean(source.enabled && text.trim()),
+    text,
+  };
+}
+
+function normalizeLinks(rawLinks) {
+  const elementIds = new Set(elements.map((item) => item.id));
+  return (Array.isArray(rawLinks) ? rawLinks : [])
+    .filter((link) => link && elementIds.has(link.fromId) && elementIds.has(link.toId))
+    .map((link, index) => ({
+      id: link.id || generateId(),
+      fromId: link.fromId,
+      toId: link.toId,
+      type: link.type || 'custom',
+      label: link.label || '',
+      description: link.description || '',
+      color: link.color || LINK_COLORS[index % LINK_COLORS.length],
+    }));
 }
 
 /**
@@ -91,18 +158,37 @@ export function initCanvas(boardId, layerPanelId, data) {
  */
 export function updateCanvasAspect(ratio) {
   if (!boardEl) return;
-  boardEl.setAttribute('data-ratio', ratio);
-  // Parse ratio and set CSS aspect-ratio dynamically
-  const parts = ratio.split(':').map(Number);
+  const sourceRatio = normalizeRatioString(ratio) || '16:9';
+  const displayRatio = getCanvasDisplayRatio(sourceRatio);
+  boardEl.setAttribute('data-ratio', sourceRatio);
+  boardEl.setAttribute('data-display-ratio', displayRatio);
+
+  // Parse display ratio and set CSS aspect-ratio dynamically.
+  const parts = displayRatio.split(':').map(Number);
   if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
     boardEl.style.aspectRatio = `${parts[0]} / ${parts[1]}`;
-    // Limit height for very tall portraits
-    if (parts[1] > parts[0]) {
-      boardEl.style.maxHeight = '600px';
-    } else {
-      boardEl.style.maxHeight = '';
-    }
+    boardEl.style.maxHeight = '';
   }
+}
+
+function normalizeRatioString(ratio) {
+  const text = String(ratio || '').trim().replace(/：/g, ':');
+  const match = text.match(/^(\d{1,4})\s*:\s*(\d{1,4})$/);
+  if (!match) return null;
+  const w = Number.parseInt(match[1], 10);
+  const h = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) return null;
+  return `${w}:${h}`;
+}
+
+function getCanvasDisplayRatio(ratio) {
+  const [w, h] = ratio.split(':').map(Number);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return '10:7';
+  }
+  if (h > w) return '3:4';
+  if (w === h) return '1:1';
+  return '10:7';
 }
 
 /**
@@ -110,8 +196,13 @@ export function updateCanvasAspect(ratio) {
  */
 export function getCanvasData() {
   return {
-    elements: elements.map(e => ({ ...e })),
+    elements: elements.map(e => ({
+      ...e,
+      textPassthrough: normalizeTextPassthrough(e.textPassthrough),
+      negativePrompt: normalizeNegativePrompt(e.negativePrompt),
+    })),
     links: links.map(l => ({ ...l })),
+    canvasNegativePrompt: normalizeNegativePrompt(canvasNegativePrompt),
   };
 }
 
@@ -134,6 +225,8 @@ export function addElement(type = 'character', layer = 'foreground') {
     h: isChar ? 28 : 18,
     zIndex: elements.length,
     focusPoint: null,
+    textPassthrough: normalizeTextPassthrough(null),
+    negativePrompt: normalizeNegativePrompt(null),
   };
   elements.push(newElem);
   render();
@@ -152,8 +245,10 @@ export function addCharacter(charData) {
 export function destroyCanvas() {
   if (boardEl) boardEl.innerHTML = '';
   if (layerPanelEl) layerPanelEl.innerHTML = '';
+  teardownBoardEvents();
   elements = [];
   links = [];
+  canvasNegativePrompt = normalizeNegativePrompt(null);
   selectedId = null;
   focusMode = {
     active: false,
@@ -196,6 +291,33 @@ function render() {
 
   // Layer panel
   renderLayerPanel();
+  renderCanvasNegativeControl();
+}
+
+function renderCanvasNegativeControl() {
+  const host = boardEl?.closest('.card')?.querySelector('.canvas-toolbar-left');
+  if (!host) return;
+  const current = normalizeNegativePrompt(canvasNegativePrompt);
+  host.innerHTML = `
+    <div class="canvas-negative-control">
+      <label class="canvas-negative-toggle">
+        <input type="checkbox" class="canvas-negative-check" ${current.enabled ? 'checked' : ''}>
+        <span>全局排除</span>
+      </label>
+      <textarea class="canvas-negative-input ${current.enabled ? '' : 'hidden'}" rows="1" placeholder="例如：no background people, no deformed hands">${esc(current.text)}</textarea>
+    </div>
+  `;
+  const check = host.querySelector('.canvas-negative-check');
+  const input = host.querySelector('.canvas-negative-input');
+  const sync = () => {
+    canvasNegativePrompt = normalizeNegativePrompt({
+      enabled: check.checked,
+      text: input.value,
+    });
+    input.classList.toggle('hidden', !check.checked);
+  };
+  check?.addEventListener('change', sync);
+  input?.addEventListener('input', sync);
 }
 
 function renderElementBox(elem) {
@@ -205,11 +327,14 @@ function renderElementBox(elem) {
   const isChar = elem.type === 'character';
   const isFocusTarget = focusMode.active && elem.id === focusMode.targetId;
   const isFocusMuted = focusMode.active && elem.id !== focusMode.targetId;
+  const exactText = getExactText(elem);
+  const hasNegativePrompt = Boolean(elem?.negativePrompt?.enabled && String(elem.negativePrompt?.text || '').trim());
 
   box.className = [
     'elem-box',
     isFg ? 'elem-fg' : 'elem-bg',
     isChar ? 'elem-char' : 'elem-obj',
+    exactText ? 'elem-text-block' : '',
     isSelected ? 'selected' : '',
     isFocusTarget ? 'focus-target' : '',
     isFocusMuted ? 'focus-muted' : '',
@@ -224,13 +349,15 @@ function renderElementBox(elem) {
   box.style.zIndex = elem.zIndex + 10;
   box.style.transform = 'translate(-50%, -50%)';
 
-  const layerTag = isFg ? '前' : '后';
+  const layerTag = exactText ? '文' : isFg ? '前' : '后';
+  const displayName = exactText ? exactText : elem.name;
 
   box.innerHTML = `
     <span class="elem-box-layer">${layerTag}</span>
-    <span class="elem-box-name">${esc(elem.name)}</span>
-    ${elem.description ? `<span class="elem-box-desc">${esc(trunc(elem.description, 14))}</span>` : ''}
+    <span class="elem-box-name">${esc(trunc(displayName, exactText ? 24 : 18))}</span>
+    ${exactText ? '<span class="elem-box-desc">原文透传</span>' : (elem.description ? `<span class="elem-box-desc">${esc(trunc(elem.description, 14))}</span>` : '')}
     ${elem.focusPoint ? `<span class="elem-box-focus">焦: ${esc(trunc(elem.focusPoint, 8))}</span>` : ''}
+    ${hasNegativePrompt ? '<span class="elem-box-neg">排除</span>' : ''}
     <button class="elem-box-edit" title="编辑">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -324,13 +451,17 @@ function renderLayerPanel() {
 
     const isFg = elem.layer === 'foreground';
     const isChar = elem.type === 'character';
+    const exactText = getExactText(elem);
     const icon = isChar ? '\u2630' : '\u25A3'; // ☰ ▣
-    const layerBadge = isFg ? '前' : '后';
+    const layerBadge = exactText ? '文' : isFg ? '前' : '后';
+    const displayName = exactText || elem.name;
+    const hasNegativePrompt = Boolean(elem?.negativePrompt?.enabled && String(elem?.negativePrompt?.text || '').trim());
 
     tag.innerHTML = `
       <span class="layer-tag-handle" title="拖拽排序">\u2261</span>
-      <span class="layer-tag-icon ${isFg ? 'layer-tag-fg' : 'layer-tag-bg'}">${layerBadge}</span>
-      <span class="layer-tag-name">${esc(trunc(elem.name, 8))}</span>
+      <span class="layer-tag-icon ${exactText ? 'layer-tag-text' : isFg ? 'layer-tag-fg' : 'layer-tag-bg'}" title="${exactText ? '文本透传' : isFg ? '前景' : '后景'}">${layerBadge}</span>
+      <span class="layer-tag-name">${esc(trunc(displayName, exactText ? 10 : 8))}</span>
+      ${hasNegativePrompt ? '<span class="layer-tag-neg" title="含排除提示">排</span>' : ''}
       <button class="layer-tag-edit" title="编辑">\u270E</button>
       <button class="layer-tag-up" title="上移">\u25B2</button>
       <button class="layer-tag-down" title="下移">\u25BC</button>
@@ -777,14 +908,11 @@ function openLinkTypePicker(fromId, toId) {
     btn.addEventListener('click', () => {
       const type = btn.dataset.type;
       let label = LINK_TYPES.find(t => t.type === type)?.label || type;
+      const description = popup.querySelector('.link-desc-input')?.value?.trim() || '';
 
       if (type === 'custom') {
-        const custom = window.prompt('输入自定义关系:');
-        if (!custom) { closeAllPopups(); linkMode = false; linkFromId = null; render(); return; }
-        label = custom;
+        label = description || '自定义关系';
       }
-
-      const description = popup.querySelector('.link-desc-input')?.value?.trim() || '';
 
       links.push({
         fromId,
@@ -848,6 +976,7 @@ function renderLinkLines() {
 function openEditPopup(id) {
   const elem = elements.find(e => e.id === id);
   if (!elem) return;
+  elem.textPassthrough = normalizeTextPassthrough(elem.textPassthrough);
 
   closeAllPopups();
   selectElement(id);
@@ -856,6 +985,9 @@ function openEditPopup(id) {
   editPopupEl = popup;
 
   const isChar = elem.type === 'character';
+  const textPassthrough = elem.textPassthrough;
+  elem.negativePrompt = normalizeNegativePrompt(elem.negativePrompt);
+  const negativePrompt = elem.negativePrompt;
 
   popup.innerHTML = `
     <div class="popup-title">编辑${isChar ? '角色' : '景物'}</div>
@@ -870,6 +1002,30 @@ function openEditPopup(id) {
     <div class="popup-field">
       <label>提示词片段</label>
       <textarea class="popup-textarea" data-key="prompt" rows="2" placeholder="该元素的具体提示词...">${esc(elem.prompt)}</textarea>
+    </div>
+    <div class="popup-field popup-text-pass-field">
+      <label class="popup-check-row">
+        <input type="checkbox" class="popup-text-pass-toggle" ${textPassthrough.enabled ? 'checked' : ''}>
+        <span>作为原文文本块透传</span>
+      </label>
+      <div class="popup-text-pass-body ${textPassthrough.enabled ? '' : 'hidden'}">
+        <label>原文文本</label>
+        <textarea class="popup-textarea" data-text-key="text" rows="2" placeholder="例如：夜间营业">${esc(textPassthrough.text)}</textarea>
+        <label>字体/排版提示（可选）</label>
+        <input type="text" class="popup-input" data-text-key="typographyHint" value="${esc(textPassthrough.typographyHint)}" placeholder="如：readable bold poster title">
+        <p class="popup-help">会以双引号原样传入优化提示词；模型仍可能近似遵循，短文本更稳定。</p>
+      </div>
+    </div>
+    <div class="popup-field popup-negative-field">
+      <label class="popup-check-row">
+        <input type="checkbox" class="popup-negative-toggle" ${negativePrompt.enabled ? 'checked' : ''}>
+        <span>排除内容</span>
+      </label>
+      <div class="popup-negative-body ${negativePrompt.enabled ? '' : 'hidden'}">
+        <label>不想在该对象上出现</label>
+        <textarea class="popup-textarea" data-negative-key="text" rows="2" placeholder="例如：deformed hands, too photorealistic">${esc(negativePrompt.text)}</textarea>
+        <p class="popup-help">会作为 Avoid 约束传入，不会混入正向主体描述。</p>
+      </div>
     </div>
     <div class="popup-field">
       <label>层</label>
@@ -889,6 +1045,13 @@ function openEditPopup(id) {
       <label>焦点物品</label>
       <input type="text" class="popup-input" data-key="focusPoint" value="${esc(elem.focusPoint || '')}" placeholder="如: 手中的信件">
     </div>
+    <div class="popup-field">
+      <label>尺寸（宽 x 高，单位：%）</label>
+      <div class="popup-size-grid">
+        <input type="number" class="popup-input" data-key="w" min="${MIN_ELEM_W}" max="${MAX_ELEM_W}" step="1" value="${Math.round(elem.w)}" placeholder="宽">
+        <input type="number" class="popup-input" data-key="h" min="${MIN_ELEM_H}" max="${MAX_ELEM_H}" step="1" value="${Math.round(elem.h)}" placeholder="高">
+      </div>
+    </div>
     <div class="popup-actions">
       <button class="popup-delete">删除</button>
       <button class="popup-close">完成</button>
@@ -899,7 +1062,81 @@ function openEditPopup(id) {
   popup.querySelectorAll('.popup-input, .popup-textarea').forEach(input => {
     input.addEventListener('input', () => {
       const key = input.dataset.key;
-      if (key) elem[key] = input.value;
+      if (!key) return;
+
+      if (key === 'w' || key === 'h') {
+        const parsed = Number.parseFloat(input.value);
+        if (!Number.isFinite(parsed)) return;
+
+        if (key === 'w') {
+          elem.w = clamp(parsed, MIN_ELEM_W, MAX_ELEM_W);
+        } else {
+          elem.h = clamp(parsed, MIN_ELEM_H, MAX_ELEM_H);
+        }
+        const halfW = elem.w / 2;
+        const halfH = elem.h / 2;
+        elem.x = clamp(elem.x, halfW, 100 - halfW);
+        elem.y = clamp(elem.y, halfH, 100 - halfH);
+        return;
+      }
+
+      elem[key] = input.value;
+    });
+  });
+
+  const textPassBody = popup.querySelector('.popup-text-pass-body');
+  const textPassToggle = popup.querySelector('.popup-text-pass-toggle');
+  const updateTextPassEnabled = () => {
+    const textValue = elem.textPassthrough?.text || '';
+    elem.textPassthrough.enabled = Boolean(textPassToggle.checked && textValue.trim());
+    textPassBody?.classList.toggle('hidden', !textPassToggle.checked);
+  };
+  textPassToggle?.addEventListener('change', () => {
+    elem.textPassthrough = normalizeTextPassthrough({
+      ...elem.textPassthrough,
+      enabled: textPassToggle.checked,
+    });
+    updateTextPassEnabled();
+  });
+
+  popup.querySelectorAll('[data-text-key]').forEach(input => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.textKey;
+      if (!key) return;
+      elem.textPassthrough = normalizeTextPassthrough({
+        ...elem.textPassthrough,
+        [key]: input.value,
+        enabled: textPassToggle?.checked,
+      });
+      updateTextPassEnabled();
+    });
+  });
+
+  const negativeBody = popup.querySelector('.popup-negative-body');
+  const negativeToggle = popup.querySelector('.popup-negative-toggle');
+  const updateNegativeEnabled = () => {
+    const textValue = elem.negativePrompt?.text || '';
+    elem.negativePrompt.enabled = Boolean(negativeToggle.checked && textValue.trim());
+    negativeBody?.classList.toggle('hidden', !negativeToggle.checked);
+  };
+  negativeToggle?.addEventListener('change', () => {
+    elem.negativePrompt = normalizeNegativePrompt({
+      ...elem.negativePrompt,
+      enabled: negativeToggle.checked,
+    });
+    updateNegativeEnabled();
+  });
+
+  popup.querySelectorAll('[data-negative-key]').forEach(input => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.negativeKey;
+      if (!key) return;
+      elem.negativePrompt = normalizeNegativePrompt({
+        ...elem.negativePrompt,
+        [key]: input.value,
+        enabled: negativeToggle?.checked,
+      });
+      updateNegativeEnabled();
     });
   });
 
@@ -956,9 +1193,10 @@ function openEditPopup(id) {
 
 function setupBoardEvents() {
   if (!boardEl) return;
+  teardownBoardEvents();
 
   // Click on empty area to deselect
-  boardEl.addEventListener('pointerdown', (e) => {
+  boardPointerDownHandler = (e) => {
     if (e.target === boardEl || e.target.classList.contains('canvas-crosshair-h') || e.target.classList.contains('canvas-crosshair-v')) {
       if (!focusMode.active) {
         selectedId = null;
@@ -972,10 +1210,11 @@ function setupBoardEvents() {
       closeAllPopups();
       render();
     }
-  });
+  };
+  boardEl.addEventListener('pointerdown', boardPointerDownHandler);
 
   // Keyboard
-  document.addEventListener('keydown', (e) => {
+  boardKeydownHandler = (e) => {
     if (!boardEl || !boardEl.offsetParent) return; // not visible
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
@@ -996,7 +1235,19 @@ function setupBoardEvents() {
       if (focusMode.active && selectedId !== focusMode.targetId) return;
       deleteElement(selectedId);
     }
-  });
+  };
+  document.addEventListener('keydown', boardKeydownHandler);
+}
+
+function teardownBoardEvents() {
+  if (boardEl && boardPointerDownHandler) {
+    boardEl.removeEventListener('pointerdown', boardPointerDownHandler);
+  }
+  if (boardKeydownHandler) {
+    document.removeEventListener('keydown', boardKeydownHandler);
+  }
+  boardPointerDownHandler = null;
+  boardKeydownHandler = null;
 }
 
 /* ============ Helpers ============ */
@@ -1034,6 +1285,11 @@ function esc(str) {
   const d = document.createElement('div');
   d.textContent = str || '';
   return d.innerHTML;
+}
+
+function getExactText(elem) {
+  const text = elem?.textPassthrough?.enabled ? String(elem.textPassthrough.text || '').trim() : '';
+  return text || '';
 }
 
 function trunc(str, max) {

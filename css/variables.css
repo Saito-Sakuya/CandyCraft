@@ -101,3 +101,66 @@
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55);
 }
+
+/* ============================================
+   Pro UI Mode — professional visual theme
+   Independent from Candy/Dark theme toggle.
+   ============================================ */
+
+html[data-ui-mode="pro"] {
+  --color-candy-pink: #A56B3F;
+  --color-candy-lavender: #5F6673;
+  --color-candy-mint: #7C806F;
+  --color-candy-peach: #C08D5D;
+  --color-candy-sky: #476478;
+  --color-candy-lemon: #D4B06A;
+
+  --color-bg-page: #EFE7D6;
+  --color-bg-card: #FFF9EC;
+  --color-bg-input: #F7EEDC;
+  --color-text-primary: #242424;
+  --color-text-secondary: #4E4E4E;
+  --color-text-tertiary: #737066;
+  --color-border: #BEB4A2;
+  --color-border-light: #D9CFBB;
+
+  --gradient-primary: linear-gradient(135deg, #343434, #6A6258);
+  --gradient-secondary: linear-gradient(135deg, #6A6258, #9B7B55);
+  --gradient-warm: linear-gradient(135deg, #8F6E49, #B0895B);
+  --gradient-cool: linear-gradient(135deg, #475866, #6B756A);
+  --gradient-candy-bg: linear-gradient(160deg, #EFE7D6 0%, #E5D9C1 100%);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-sm: 0 1px 2px rgba(36, 36, 36, 0.08);
+  --shadow-md: 0 4px 14px rgba(36, 36, 36, 0.12);
+  --shadow-lg: 0 12px 28px rgba(36, 36, 36, 0.18);
+  --shadow-glow-pink: 0 2px 10px rgba(52, 52, 52, 0.16);
+  --shadow-glow-lavender: 0 2px 10px rgba(52, 52, 52, 0.14);
+}
+
+html[data-ui-mode="pro"][data-theme="dark"] {
+  --color-bg-page: #242424;
+  --color-bg-card: #303030;
+  --color-bg-input: #262626;
+  --color-text-primary: #F1E7D2;
+  --color-text-secondary: #D2C7B4;
+  --color-text-tertiary: #A89C8C;
+  --color-border: #55504A;
+  --color-border-light: #43403B;
+
+  --gradient-primary: linear-gradient(135deg, #F1E7D2, #B8AA91);
+  --gradient-secondary: linear-gradient(135deg, #A89C8C, #6F7773);
+  --gradient-warm: linear-gradient(135deg, #B8AA91, #8B765B);
+  --gradient-cool: linear-gradient(135deg, #67747A, #8A8975);
+  --gradient-candy-bg: linear-gradient(160deg, #202020 0%, #2A2926 100%);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.34);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.42);
+  --shadow-glow-pink: 0 2px 10px rgba(241, 231, 210, 0.12);
+  --shadow-glow-lavender: 0 2px 10px rgba(241, 231, 210, 0.1);
+}

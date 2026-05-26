@@ -1,8 +1,8 @@
 /**
  * settings.js — Settings panel management
  * Dual mode:
- * - managed: /api/chat proxy, backend controls model
- * - custom: browser direct with baseUrl/apiKey/model
+ * - managed: /api/* proxy, backend controls secrets/models
+ * - custom: browser direct with role-based baseUrl/apiKey/model
  */
 
 import { getApiConfig, setApiConfig, testConnection, cleanupLegacyApiConfig } from './api.js';
@@ -13,17 +13,17 @@ let overlayEl = null;
 let modeRadios = [];
 let managedSectionEl = null;
 let customSectionEl = null;
-let customBaseUrlInput = null;
-let customApiKeyInput = null;
-let customModelInput = null;
-let customKeyToggleBtn = null;
+
+const ROLE_KEYS = ['structure', 'lighting', 'normalize'];
+const roleRefs = {
+  structure: { baseUrl: null, apiKey: null, model: null, toggle: null },
+  lighting: { baseUrl: null, apiKey: null, model: null, toggle: null },
+  normalize: { baseUrl: null, apiKey: null, model: null, toggle: null },
+};
 
 const MODE_MANAGED = 'managed';
 const MODE_CUSTOM = 'custom';
 
-/**
- * Initialize the settings panel: load config, bind events
- */
 export function initSettings() {
   panelEl = document.getElementById('settings-panel');
   overlayEl = document.getElementById('settings-overlay');
@@ -35,10 +35,21 @@ export function initSettings() {
   modeRadios = Array.from(document.querySelectorAll('input[name="api-mode"]'));
   managedSectionEl = document.getElementById('managed-config-section');
   customSectionEl = document.getElementById('custom-config-section');
-  customBaseUrlInput = document.getElementById('custom-api-base-url');
-  customApiKeyInput = document.getElementById('custom-api-key');
-  customModelInput = document.getElementById('custom-model-name');
-  customKeyToggleBtn = document.getElementById('toggle-custom-key-visibility');
+
+  roleRefs.structure.baseUrl = document.getElementById('role-structure-base-url');
+  roleRefs.structure.apiKey = document.getElementById('role-structure-api-key');
+  roleRefs.structure.model = document.getElementById('role-structure-model');
+  roleRefs.structure.toggle = document.getElementById('toggle-role-structure-key-visibility');
+
+  roleRefs.lighting.baseUrl = document.getElementById('role-lighting-base-url');
+  roleRefs.lighting.apiKey = document.getElementById('role-lighting-api-key');
+  roleRefs.lighting.model = document.getElementById('role-lighting-model');
+  roleRefs.lighting.toggle = document.getElementById('toggle-role-lighting-key-visibility');
+
+  roleRefs.normalize.baseUrl = document.getElementById('role-normalize-base-url');
+  roleRefs.normalize.apiKey = document.getElementById('role-normalize-api-key');
+  roleRefs.normalize.model = document.getElementById('role-normalize-model');
+  roleRefs.normalize.toggle = document.getElementById('toggle-role-normalize-key-visibility');
 
   cleanupLegacyApiConfig();
 
@@ -58,14 +69,16 @@ export function initSettings() {
     });
   }
 
-  customKeyToggleBtn?.addEventListener('click', () => {
-    if (!customApiKeyInput) return;
-    const isHidden = customApiKeyInput.type === 'password';
-    customApiKeyInput.type = isHidden ? 'text' : 'password';
-    customKeyToggleBtn.innerHTML = isHidden
-      ? '<svg width="18" height="18"><use href="#icon-eye-off"/></svg>'
-      : '<svg width="18" height="18"><use href="#icon-eye"/></svg>';
-  });
+  for (const role of ROLE_KEYS) {
+    const refs = roleRefs[role];
+    refs.toggle?.addEventListener('click', () => {
+      const isHidden = refs.apiKey?.type === 'password';
+      if (refs.apiKey) refs.apiKey.type = isHidden ? 'text' : 'password';
+      refs.toggle.innerHTML = isHidden
+        ? '<svg width="18" height="18"><use href="#icon-eye-off"/></svg>'
+        : '<svg width="18" height="18"><use href="#icon-eye"/></svg>';
+    });
+  }
 
   btnSave?.addEventListener('click', () => {
     const draft = collectDraftConfig();
@@ -79,7 +92,7 @@ export function initSettings() {
 
     setApiConfig(draft);
     showToast(
-      draft.mode === MODE_MANAGED ? '已保存后台托管模式配置' : '已保存用户自定义模式配置',
+      draft.mode === MODE_MANAGED ? '已保存后台托管模式配置' : '已保存用户自定义多角色配置',
       'success'
     );
     closeSettings();
@@ -115,39 +128,48 @@ function setInitialValues(config) {
     radio.checked = radio.value === mode;
   }
 
-  if (customBaseUrlInput) customBaseUrlInput.value = config.customBaseUrl || '';
-  if (customApiKeyInput) customApiKeyInput.value = config.customApiKey || '';
-  if (customModelInput) customModelInput.value = config.customModel || '';
+  for (const role of ROLE_KEYS) {
+    const refs = roleRefs[role];
+    const roleConfig = config.roles?.[role] || {};
+    if (refs.baseUrl) refs.baseUrl.value = roleConfig.baseUrl || '';
+    if (refs.apiKey) refs.apiKey.value = roleConfig.apiKey || '';
+    if (refs.model) refs.model.value = roleConfig.model || '';
+  }
 }
 
 function collectDraftConfig() {
+  const roles = {};
+  for (const role of ROLE_KEYS) {
+    const refs = roleRefs[role];
+    roles[role] = {
+      baseUrl: refs.baseUrl?.value.trim() || '',
+      apiKey: refs.apiKey?.value.trim() || '',
+      model: refs.model?.value.trim() || '',
+    };
+  }
+
   return {
     mode: getSelectedMode(),
-    customBaseUrl: customBaseUrlInput?.value.trim() || '',
-    customApiKey: customApiKeyInput?.value.trim() || '',
-    customModel: customModelInput?.value.trim() || '',
+    roles,
   };
 }
 
 function getMissingCustomFields(config) {
   const missing = [];
-  if (!config.customBaseUrl) missing.push('Base URL');
-  if (!config.customApiKey) missing.push('API Key');
-  if (!config.customModel) missing.push('Model');
+  for (const role of ROLE_KEYS) {
+    const roleConfig = config.roles?.[role] || {};
+    if (!roleConfig.baseUrl) missing.push(`${role}.Base URL`);
+    if (!roleConfig.apiKey) missing.push(`${role}.API Key`);
+    if (!roleConfig.model) missing.push(`${role}.Model`);
+  }
   return missing;
 }
 
-/**
- * Open the settings panel
- */
 export function openSettings() {
   panelEl?.classList.add('open');
   overlayEl?.classList.add('open');
 }
 
-/**
- * Close the settings panel
- */
 export function closeSettings() {
   panelEl?.classList.remove('open');
   overlayEl?.classList.remove('open');

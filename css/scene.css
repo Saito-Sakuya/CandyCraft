@@ -3,6 +3,135 @@
    ============================================ */
 
 /* ---- Three-View Container ---- */
+.scene-dual-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  align-items: stretch;
+}
+
+#scene-3d-preview {
+  width: 100%;
+  min-height: 320px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(246, 248, 255, 0.9));
+  position: relative;
+  overflow: hidden;
+}
+
+#scene-container {
+  width: 100%;
+}
+
+body.poster-workspace-active .poster-floating-scene {
+  min-height: 100%;
+}
+
+body.poster-workspace-active .poster-floating-scene #scene-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+body.poster-workspace-active .poster-floating-scene #scene-section > .card-title {
+  flex: 0 0 auto;
+  margin: 0 0 var(--space-sm);
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-dual-layout {
+  display: grid;
+  grid-template-columns: minmax(500px, 2.1fr) minmax(260px, 0.9fr);
+  grid-auto-rows: auto;
+  gap: var(--space-md);
+  align-items: start;
+  min-height: 0;
+}
+
+body.poster-workspace-active .poster-floating-scene #scene-3d-preview {
+  grid-column: 1;
+  min-height: 320px;
+}
+
+body.poster-workspace-active .poster-floating-scene #scene-container,
+body.poster-workspace-active .poster-floating-scene .scene-mobile-groups {
+  display: contents;
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-fold {
+  min-width: 0;
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-fold-views,
+body.poster-workspace-active .poster-floating-scene .scene-fold-legend,
+body.poster-workspace-active .poster-floating-scene .scene-fold-lights {
+  grid-column: 1;
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-fold-controls {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  max-height: calc(100dvh - var(--poster-header-offset, 88px) - 132px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-fold-controls .scene-fold-body {
+  max-height: none;
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-views {
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
+body.poster-workspace-active .poster-floating-scene .scene-view {
+  min-height: 160px;
+}
+
+body.poster-workspace-active .poster-floating-scene .light-cards {
+  max-height: 520px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.scene-3d-preview {
+  width: 100%;
+  min-height: 320px;
+}
+
+.scene-3d-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+.scene-3d-stage canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.scene-3d-status {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  font-size: 0.66rem;
+  color: var(--color-text-tertiary);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  backdrop-filter: blur(4px);
+}
+
 .scene-views {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -321,6 +450,14 @@
   margin: 0;
 }
 
+@media (max-width: 1280px) {
+  #scene-3d-preview,
+  .scene-3d-preview,
+  .scene-3d-stage {
+    min-height: 280px;
+  }
+}
+
 /* ---- Scene Controls ---- */
 .scene-controls {
   display: flex;
@@ -568,6 +705,32 @@
 
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
+  body.poster-workspace-active .poster-floating-scene .scene-dual-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  body.poster-workspace-active .poster-floating-scene #scene-container,
+  body.poster-workspace-active .poster-floating-scene .scene-mobile-groups {
+    display: block;
+  }
+
+  body.poster-workspace-active .poster-floating-scene .scene-fold-controls {
+    max-height: none;
+    overflow: visible;
+  }
+
+  body.poster-workspace-active .poster-floating-scene .light-cards {
+    max-height: none;
+    overflow: visible;
+  }
+
+  #scene-3d-preview,
+  .scene-3d-preview,
+  .scene-3d-stage {
+    min-height: 250px;
+  }
+
   .scene-view {
     min-height: 180px;
   }
@@ -654,6 +817,51 @@
   flex-direction: column;
   gap: var(--space-sm);
   margin: var(--space-sm) 0;
+}
+
+.scene-light-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 2px 2px 4px;
+}
+
+.scene-light-count {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
+.scene-light-action-btn,
+.scene-light-remove-btn {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.scene-light-action-btn {
+  padding: 6px 8px;
+}
+
+.scene-light-remove-btn {
+  padding: 4px 6px;
+}
+
+.scene-light-action-btn:hover,
+.scene-light-remove-btn:hover {
+  border-color: var(--color-candy-lavender);
+  color: var(--color-candy-lavender);
+}
+
+.scene-light-action-btn:disabled,
+.scene-light-remove-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Individual light card */

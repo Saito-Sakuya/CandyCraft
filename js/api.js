@@ -1,12 +1,34 @@
 /**
  * api.js — AI API communication layer
  * Dual-mode transport:
- * - managed: same-origin Cloudflare Pages Function proxy (/api/chat)
- * - custom: browser direct call to customBaseUrl/chat/completions
+ * - managed: same-origin Cloudflare Pages Function proxy (/api/chat, /api/analyze-orchestrate)
+ * - custom: browser direct call by role (structure/lighting/normalize)
  */
+
+const MODE_MANAGED = 'managed';
+const MODE_CUSTOM = 'custom';
+const ROLE_KEYS = ['structure', 'lighting', 'normalize'];
 
 const STORAGE_KEYS = {
   mode: 'pc_api_mode',
+  role: {
+    structure: {
+      baseUrl: 'pc_role_structure_base_url',
+      apiKey: 'pc_role_structure_api_key',
+      model: 'pc_role_structure_model',
+    },
+    lighting: {
+      baseUrl: 'pc_role_lighting_base_url',
+      apiKey: 'pc_role_lighting_api_key',
+      model: 'pc_role_lighting_model',
+    },
+    normalize: {
+      baseUrl: 'pc_role_normalize_base_url',
+      apiKey: 'pc_role_normalize_api_key',
+      model: 'pc_role_normalize_model',
+    },
+  },
+  // Legacy single-custom keys (migration source)
   customBaseUrl: 'pc_custom_base_url',
   customApiKey: 'pc_custom_api_key',
   customModel: 'pc_custom_model',
@@ -20,8 +42,7 @@ const LEGACY_STORAGE_KEYS = [
 ];
 
 const API_PATH = '/api/chat';
-const MODE_MANAGED = 'managed';
-const MODE_CUSTOM = 'custom';
+const ORCHESTRATE_PATH = '/api/analyze-orchestrate';
 
 function sanitizeMode(value) {
   return value === MODE_CUSTOM ? MODE_CUSTOM : MODE_MANAGED;
@@ -43,23 +64,67 @@ function setStorageText(key, value) {
   }
 }
 
+function readRoleConfigFromStorage(role) {
+  const keys = STORAGE_KEYS.role[role];
+  return {
+    baseUrl: normalizeBaseUrl(localStorage.getItem(keys.baseUrl)),
+    apiKey: sanitizeText(localStorage.getItem(keys.apiKey)),
+    model: sanitizeText(localStorage.getItem(keys.model)),
+  };
+}
+
+function writeRoleConfigToStorage(role, cfg) {
+  const keys = STORAGE_KEYS.role[role];
+  if (!keys) return;
+  if (!cfg || typeof cfg !== 'object') return;
+  if (cfg.baseUrl !== undefined) setStorageText(keys.baseUrl, normalizeBaseUrl(cfg.baseUrl));
+  if (cfg.apiKey !== undefined) setStorageText(keys.apiKey, sanitizeText(cfg.apiKey));
+  if (cfg.model !== undefined) setStorageText(keys.model, sanitizeText(cfg.model));
+}
+
 function migrateLegacyConfig() {
-  cleanupLegacyApiConfig();
+  const legacyBaseUrl = normalizeBaseUrl(localStorage.getItem(STORAGE_KEYS.customBaseUrl));
+  const legacyApiKey = sanitizeText(localStorage.getItem(STORAGE_KEYS.customApiKey));
+  const legacyModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.customModel));
+
+  const shouldCopy = Boolean(legacyBaseUrl || legacyApiKey || legacyModel);
+  if (!shouldCopy) return;
+
+  for (const role of ROLE_KEYS) {
+    const current = readRoleConfigFromStorage(role);
+    const next = {
+      baseUrl: current.baseUrl || legacyBaseUrl,
+      apiKey: current.apiKey || legacyApiKey,
+      model: current.model || legacyModel,
+    };
+    writeRoleConfigToStorage(role, next);
+  }
+
+  localStorage.removeItem(STORAGE_KEYS.customBaseUrl);
+  localStorage.removeItem(STORAGE_KEYS.customApiKey);
+  localStorage.removeItem(STORAGE_KEYS.customModel);
 }
 
 function readStoredConfig() {
   migrateLegacyConfig();
 
   const mode = sanitizeMode(localStorage.getItem(STORAGE_KEYS.mode));
-  const customBaseUrl = normalizeBaseUrl(localStorage.getItem(STORAGE_KEYS.customBaseUrl));
-  const customApiKey = sanitizeText(localStorage.getItem(STORAGE_KEYS.customApiKey));
-  const customModel = sanitizeText(localStorage.getItem(STORAGE_KEYS.customModel));
+  const roles = {};
+  for (const role of ROLE_KEYS) {
+    roles[role] = readRoleConfigFromStorage(role);
+  }
 
   return {
     mode,
-    customBaseUrl,
-    customApiKey,
-    customModel,
+    roles,
+  };
+}
+
+function sanitizeRoleConfig(input = {}) {
+  return {
+    baseUrl: normalizeBaseUrl(input.baseUrl),
+    apiKey: sanitizeText(input.apiKey),
+    model: sanitizeText(input.model),
   };
 }
 
@@ -69,49 +134,75 @@ function mergeConfigWithOverride(current, overrideConfig) {
   }
 
   const mode = sanitizeMode(overrideConfig.mode ?? current.mode);
-  const customBaseUrl = normalizeBaseUrl(
-    overrideConfig.customBaseUrl ?? current.customBaseUrl
-  );
-  const customApiKey = sanitizeText(
-    overrideConfig.customApiKey ?? current.customApiKey
-  );
-  const customModel = sanitizeText(
-    overrideConfig.customModel ?? overrideConfig.model ?? current.customModel
-  );
+  const nextRoles = {};
+  for (const role of ROLE_KEYS) {
+    const fromCurrent = current.roles?.[role] || {};
+    const fromOverride = overrideConfig.roles?.[role] || {};
+
+    // backward compatibility: single custom fields override all roles
+    const singleBase = overrideConfig.customBaseUrl;
+    const singleKey = overrideConfig.customApiKey;
+    const singleModel = overrideConfig.customModel ?? overrideConfig.model;
+
+    nextRoles[role] = sanitizeRoleConfig({
+      baseUrl: fromOverride.baseUrl ?? singleBase ?? fromCurrent.baseUrl,
+      apiKey: fromOverride.apiKey ?? singleKey ?? fromCurrent.apiKey,
+      model: fromOverride.model ?? singleModel ?? fromCurrent.model,
+    });
+  }
 
   return {
     mode,
-    customBaseUrl,
-    customApiKey,
-    customModel,
+    roles: nextRoles,
   };
 }
 
 function toPublicConfig(config) {
   return {
-    ...config,
-    model: config.mode === MODE_CUSTOM ? config.customModel : '',
+    mode: config.mode,
+    roles: config.roles,
+    // compatibility with old callers
+    customBaseUrl: config.roles?.structure?.baseUrl || '',
+    customApiKey: config.roles?.structure?.apiKey || '',
+    customModel: config.roles?.structure?.model || '',
+    model: config.mode === MODE_CUSTOM ? (config.roles?.structure?.model || '') : '',
   };
 }
 
-function getRequiredCustomFields(config) {
+function getMissingRoleFields(config, role) {
+  const roleConfig = config.roles?.[role] || {};
   const missing = [];
-  if (!config.customBaseUrl) missing.push('Base URL');
-  if (!config.customApiKey) missing.push('API Key');
-  if (!config.customModel) missing.push('Model');
+  if (!roleConfig.baseUrl) missing.push(`${role}.Base URL`);
+  if (!roleConfig.apiKey) missing.push(`${role}.API Key`);
+  if (!roleConfig.model) missing.push(`${role}.Model`);
   return missing;
 }
 
-function buildRequestTarget(config) {
+function getAllMissingCustomFields(config) {
+  const missing = [];
+  for (const role of ROLE_KEYS) {
+    missing.push(...getMissingRoleFields(config, role));
+  }
+  return missing;
+}
+
+function resolveRoleConfig(config, role = 'structure') {
+  const preferred = ROLE_KEYS.includes(role) ? role : 'structure';
+  return sanitizeRoleConfig(config.roles?.[preferred] || {});
+}
+
+function buildRequestTarget(config, role = 'structure') {
   if (config.mode === MODE_CUSTOM) {
+    const roleConfig = resolveRoleConfig(config, role);
     return {
-      endpoint: `${config.customBaseUrl}/chat/completions`,
+      endpoint: `${roleConfig.baseUrl}/chat/completions`,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.customApiKey}`,
+        Authorization: `Bearer ${roleConfig.apiKey}`,
       },
-      model: config.customModel,
+      model: roleConfig.model,
       mode: MODE_CUSTOM,
+      role,
     };
   }
 
@@ -121,6 +212,7 @@ function buildRequestTarget(config) {
       'Content-Type': 'application/json',
     },
     mode: MODE_MANAGED,
+    role,
   };
 }
 
@@ -136,38 +228,24 @@ function buildRequestBody(target, messages, stream, temperature) {
   return body;
 }
 
-/**
- * Read API configuration from localStorage
- */
 export function getApiConfig() {
   const stored = readStoredConfig();
   return toPublicConfig(stored);
 }
 
-/**
- * Save API configuration to localStorage
- */
 export function setApiConfig(nextConfig = {}) {
   migrateLegacyConfig();
-  const config = (nextConfig && typeof nextConfig === 'object') ? nextConfig : {};
+  const current = readStoredConfig();
+  const merged = mergeConfigWithOverride(current, nextConfig);
 
-  if (config.mode !== undefined) {
-    localStorage.setItem(STORAGE_KEYS.mode, sanitizeMode(config.mode));
+  if (merged.mode !== undefined) {
+    localStorage.setItem(STORAGE_KEYS.mode, sanitizeMode(merged.mode));
   }
-  if (config.customBaseUrl !== undefined) {
-    setStorageText(STORAGE_KEYS.customBaseUrl, normalizeBaseUrl(config.customBaseUrl));
-  }
-  if (config.customApiKey !== undefined) {
-    setStorageText(STORAGE_KEYS.customApiKey, sanitizeText(config.customApiKey));
-  }
-  if (config.customModel !== undefined) {
-    setStorageText(STORAGE_KEYS.customModel, sanitizeText(config.customModel));
+  for (const role of ROLE_KEYS) {
+    writeRoleConfigToStorage(role, merged.roles?.[role]);
   }
 }
 
-/**
- * Remove legacy browser-side secrets/config keys
- */
 export function cleanupLegacyApiConfig() {
   for (const key of LEGACY_STORAGE_KEYS) {
     localStorage.removeItem(key);
@@ -192,18 +270,30 @@ function getCustomModeHint(err) {
   return '自定义端点连接失败：该端点可能不支持浏览器直连，或未放开 CORS。请检查 Base URL、跨域配置与 HTTPS 证书。';
 }
 
-/**
- * Test connection with a tiny request
- * @param {Object | null} [overrideConfig]
- * @returns {Promise<{ success: boolean, message: string }>}
- */
+async function checkSingleConnection(target) {
+  const res = await fetch(target.endpoint, {
+    method: 'POST',
+    headers: target.headers,
+    body: JSON.stringify(buildRequestBody(
+      target,
+      [{ role: 'user', content: 'Hi' }],
+      false,
+      0
+    )),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    const message = getErrorMessage(errBody, `HTTP ${res.status}`);
+    throw new Error(message);
+  }
+}
+
 export async function testConnection(overrideConfig = null) {
   const current = readStoredConfig();
   const config = mergeConfigWithOverride(current, overrideConfig);
-  const target = buildRequestTarget(config);
 
   if (config.mode === MODE_CUSTOM) {
-    const missing = getRequiredCustomFields(config);
+    const missing = getAllMissingCustomFields(config);
     if (missing.length > 0) {
       return {
         success: false,
@@ -213,27 +303,15 @@ export async function testConnection(overrideConfig = null) {
   }
 
   try {
-    const res = await fetch(target.endpoint, {
-      method: 'POST',
-      headers: target.headers,
-      body: JSON.stringify(buildRequestBody(
-        target,
-        [{ role: 'user', content: 'Hi' }],
-        false,
-        0
-      )),
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      const message = getErrorMessage(errBody, `HTTP ${res.status}`);
-      return { success: false, message: `连接失败: ${message}` };
+    if (config.mode === MODE_MANAGED) {
+      await checkSingleConnection(buildRequestTarget(config, 'structure'));
+      return { success: true, message: '连接成功（已通过同源代理）' };
     }
 
-    if (config.mode === MODE_CUSTOM) {
-      return { success: true, message: '连接成功（已直连自定义端点）' };
+    for (const role of ROLE_KEYS) {
+      await checkSingleConnection(buildRequestTarget(config, role));
     }
-    return { success: true, message: '连接成功（已通过同源代理）' };
+    return { success: true, message: '连接成功（三角色端点均可用）' };
   } catch (err) {
     if (config.mode === MODE_CUSTOM) {
       const hint = getCustomModeHint(err);
@@ -243,22 +321,12 @@ export async function testConnection(overrideConfig = null) {
   }
 }
 
-/**
- * Stream a chat completion request
- *
- * @param {Array<{role:string, content:string}>} messages
- * @param {Object} callbacks
- * @param {(chunk: string) => void} callbacks.onChunk
- * @param {(fullText: string) => void} callbacks.onDone
- * @param {(error: Error) => void} callbacks.onError
- * @param {AbortSignal} [callbacks.signal]
- */
-export async function streamChat(messages, { onChunk, onDone, onError, signal }) {
+export async function streamChat(messages, { onChunk, onDone, onError, signal, role = 'structure' }) {
   const config = readStoredConfig();
-  const target = buildRequestTarget(config);
+  const target = buildRequestTarget(config, role);
 
   if (target.mode === MODE_CUSTOM) {
-    const missing = getRequiredCustomFields(config);
+    const missing = getMissingRoleFields(config, role);
     if (missing.length > 0) {
       throw new Error(`自定义模式缺少必填项：${missing.join(' / ')}`);
     }
@@ -352,4 +420,22 @@ export async function streamChat(messages, { onChunk, onDone, onError, signal })
     onError?.(err);
     throw err;
   }
+}
+
+export async function requestAnalyzeOrchestrate(payload, { signal } = {}) {
+  const response = await fetch(ORCHESTRATE_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload || {}),
+    signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(getErrorMessage(text, `编排请求失败 (${response.status})`));
+  }
+
+  return response.json();
 }

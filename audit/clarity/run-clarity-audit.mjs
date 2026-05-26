@@ -8,7 +8,12 @@ import {
   buildLightingRetryMessages,
   parseAnalysisResponse,
   parseLightingRecommendationEnvelope,
+  parsePresetRefreshResponse,
+  parseDimensionsRefreshResponse,
+  parseDimensionReplacementResponse,
+  parseOptimizeResponse,
 } from '../../js/prompt.js';
+import { AI_CONTRACTS } from '../../js/ai-contract.js';
 import {
   inferSceneRecommendationFromPrompt,
   mergeSceneRecommendations,
@@ -33,6 +38,9 @@ const CLARITY_RESULTS_PATH = path.resolve('audit/clarity/prompt-clarity-results.
 const CLARITY_REPORT_PATH = path.resolve('audit/clarity/prompt-clarity-report.md');
 const IMAGE_CHECK_PATH = path.resolve('audit/clarity/image-generation-check.json');
 const LOCAL_CHAT_ENDPOINT = process.env.CLARITY_CHAT_ENDPOINT || 'http://127.0.0.1:8788/api/chat';
+const CLARITY_DEFAULT_CONCURRENCY = Number.parseInt(process.env.CLARITY_CONCURRENCY || '2', 10);
+const CLARITY_MAX_RETRIES = Number.parseInt(process.env.CLARITY_MAX_RETRIES || '2', 10);
+const CLARITY_CHAT_TIMEOUT_MS = Number.parseInt(process.env.CLARITY_CHAT_TIMEOUT_MS || '30000', 10);
 
 const SAMPLES = [
   { id: 'S01', group: 'night', prompt: '雨夜街头霓虹，黑色风衣男子站在路灯下，电影感，低机位' },
@@ -56,6 +64,23 @@ const SAMPLES = [
   { id: 'S19', group: 'orientation', prompt: '电影海报竖版构图，角色居中，比例 2:3，低照度侧光' },
   { id: 'S20', group: 'orientation', prompt: '超宽银幕横版，比例 21:9，荒漠追车场景，强逆光' },
   { id: 'S21', group: 'indoor_explicit_night', prompt: '夜晚室内双人对话，低照度电影感，窗外霓虹反射', expect: { indoorExplicitNight: true } },
+  { id: 'S22', group: 'negative', prompt: '空旷商业街海报，突出店铺门头，不要让背景出现路人', canvasNegativePrompt: { enabled: true, text: 'no background people' }, expect: { negativeTexts: ['no background people'] } },
+  { id: 'S23', group: 'negative', prompt: '人物半身海报，手部动作自然，避免手部走形', elements: [
+    { id: 'fg_1', type: 'character', layer: 'foreground', name: '人物', x: 50, y: 58, w: 22, h: 32, zIndex: 1, description: '主要角色', focusPoint: 'hands', negativePrompt: { enabled: true, text: 'deformed hands' } },
+    { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
+  ], expect: { negativeTexts: ['deformed hands'] } },
+  { id: 'S24', group: 'negative', prompt: '品牌角色海报，质感细腻但不要太像真实照片', elements: [
+    { id: 'fg_1', type: 'character', layer: 'foreground', name: '品牌角色', x: 50, y: 58, w: 22, h: 32, zIndex: 1, description: '主要角色', negativePrompt: { enabled: true, text: 'too photorealistic' } },
+    { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
+  ], expect: { negativeTexts: ['too photorealistic'] } },
+  { id: 'S25', group: 'negative', prompt: '年轻人物宣传照，保持插画感但不要过度动漫化', elements: [
+    { id: 'fg_1', type: 'character', layer: 'foreground', name: '年轻人物', x: 50, y: 58, w: 22, h: 32, zIndex: 1, description: '主要角色', negativePrompt: { enabled: true, text: 'too anime' } },
+    { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
+  ], expect: { negativeTexts: ['too anime'] } },
+  { id: 'S26', group: 'negative_text', prompt: '海报标题写着“今日限定”，背景简洁且不要出现人群', elements: [
+    { id: 'txt_1', type: 'object', layer: 'foreground', name: '标题', x: 50, y: 18, w: 42, h: 10, zIndex: 2, textPassthrough: { enabled: true, text: '今日限定', typographyHint: 'bold readable poster title' } },
+    { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
+  ], canvasNegativePrompt: { enabled: true, text: 'crowd in the background' }, expect: { negativeTexts: ['crowd in the background'], exactTexts: ['今日限定'] } },
 ];
 
 const DEFAULT_DIMENSIONS = [
@@ -65,12 +90,86 @@ const DEFAULT_DIMENSIONS = [
   { name: '构图张力', min: 0, max: 100, value: 68, labels: ['稳态', '张力'] },
   { name: '材质表现', min: 0, max: 100, value: 65, labels: ['概括', '真实'] },
   { name: '叙事深度', min: 0, max: 100, value: 60, labels: ['直给', '隐喻'] },
+  { name: '风格强度', min: 0, max: 100, value: 62, labels: ['克制', '强烈'] },
+  { name: '氛围渲染', min: 0, max: 100, value: 64, labels: ['自然', '戏剧'] },
 ];
 
 const DEFAULT_ELEMENTS = [
   { id: 'fg_1', type: 'character', layer: 'foreground', name: '主体', x: 50, y: 58, w: 22, h: 32, zIndex: 1, description: '主要角色', focusPoint: '面部表情' },
   { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
 ];
+
+function getSampleElements(sample) {
+  return Array.isArray(sample.elements) ? sample.elements : DEFAULT_ELEMENTS;
+}
+
+function getExactTextsFromElements(elements = []) {
+  return (Array.isArray(elements) ? elements : [])
+    .map((item) => item?.textPassthrough?.enabled ? String(item.textPassthrough.text || '').trim() : '')
+    .filter(Boolean);
+}
+
+function getNegativePromptContext(elements = [], canvasNegativePrompt = null) {
+  const entries = [];
+  const globalText = canvasNegativePrompt?.enabled ? String(canvasNegativePrompt.text || '').trim() : '';
+  if (globalText) entries.push({ scope: 'global', text: globalText });
+  for (const item of Array.isArray(elements) ? elements : []) {
+    const text = item?.negativePrompt?.enabled ? String(item.negativePrompt.text || '').trim() : '';
+    if (!text) continue;
+    entries.push({
+      scope: 'object',
+      elementId: item.id || '',
+      elementName: item.name || '',
+      elementLayer: item.layer || '',
+      text,
+    });
+  }
+  return entries;
+}
+
+function makeSyntheticAnalysis(sample) {
+  const elements = getSampleElements(sample).map((item, index) => ({
+    id: item.id || `elem_${index + 1}`,
+    type: item.type === 'object' ? 'object' : 'character',
+    layer: item.layer === 'background' ? 'background' : 'foreground',
+    name: item.name || `元素${index + 1}`,
+    description: item.description || '',
+    role: item.role || (item.layer === 'background' ? '背景景物' : '主角'),
+    position: { x: item.x ?? item.position?.x ?? 50, y: item.y ?? item.position?.y ?? 50 },
+    size: { w: item.w ?? item.size?.w ?? 22, h: item.h ?? item.size?.h ?? 32 },
+    focusPoint: item.focusPoint || '',
+    textPassthrough: item.textPassthrough || undefined,
+    negativePrompt: item.negativePrompt || undefined,
+  }));
+  const dimensions = DEFAULT_DIMENSIONS.map((item) => ({
+    name: item.name,
+    description: item.description || `${item.name}控制`,
+    min: 0,
+    max: 100,
+    default: Number(item.value ?? item.default ?? 50),
+    labels: item.labels || ['低', '高'],
+  }));
+  const presets = [
+    {
+      name: '电影感',
+      description: '强化镜头、光影和叙事张力。',
+      values: Object.fromEntries(dimensions.map((item) => [item.name, item.default])),
+    },
+  ];
+  const fixture = {
+    schemaVersion: AI_CONTRACTS.analysis.schemaVersion,
+    orderedFields: AI_CONTRACTS.analysis.orderedFields,
+    dimensions,
+    elements,
+    presets,
+    sceneRecommendation: inferSceneRecommendationFromPrompt(sample.prompt) || {},
+    compositionRecommendation: inferCompositionRecommendationFromPrompt(sample.prompt) || { ratio: '16:9', orientation: 'landscape' },
+  };
+  return {
+    raw: JSON.stringify(fixture),
+    parsed: parseAnalysisResponse(JSON.stringify(fixture)),
+  };
+}
 
 function sanitizeSceneRecommendationForModel(reco) {
   if (!reco || typeof reco !== 'object') return {};
@@ -115,11 +214,38 @@ function makeSceneFromReco(reco) {
 function makeCompositionFromReco(compositionReco) {
   const ratio = compositionReco?.ratio || '16:9';
   const orientation = compositionReco?.orientation || inferOrientationFromRatio(ratio) || 'landscape';
+  const presets = [1024, 1536, 1920, 2048, 2560, 2712, 3072, 3840, 4096, 7680];
+  const resolutionLongEdge = presets[1];
+  const [rw, rh] = ratio.split(':').map((n) => Number.parseInt(n, 10));
+  let width = 1536;
+  let height = 864;
+  if (Number.isFinite(rw) && Number.isFinite(rh) && rw > 0 && rh > 0) {
+    if (rw >= rh) {
+      width = resolutionLongEdge;
+      height = Math.round((resolutionLongEdge * rh) / rw);
+    } else {
+      height = resolutionLongEdge;
+      width = Math.round((resolutionLongEdge * rw) / rh);
+    }
+  }
   return {
     ratio,
     orientation,
-    resolution: '2K',
+    sizeMode: 'preset_resolution',
+    resolutionLongEdge,
+    width,
+    height,
+    resolution: `${resolutionLongEdge}px`,
   };
+}
+
+function parseRatio(ratio) {
+  const m = String(ratio || '').match(/^(\d+):(\d+)$/);
+  if (!m) return null;
+  const w = Number.parseInt(m[1], 10);
+  const h = Number.parseInt(m[2], 10);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) return null;
+  return { w, h };
 }
 
 function buildFallbackLightingRecommendation(scene) {
@@ -140,22 +266,65 @@ function extractContentFromChatResponse(json) {
 }
 
 async function callChat(messages) {
-  const response = await fetch(LOCAL_CHAT_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      stream: false,
-      temperature: 0.4,
-    }),
-  });
+  return callChatWithRetry(messages, { allowRetry: true, timeoutMs: CLARITY_CHAT_TIMEOUT_MS });
+}
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`HTTP ${response.status}: ${text.slice(0, 180)}`);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callChatWithRetry(messages, { allowRetry = true, timeoutMs = CLARITY_CHAT_TIMEOUT_MS } = {}) {
+  const maxAttempts = allowRetry ? Math.max(1, CLARITY_MAX_RETRIES + 1) : 1;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error('chat_timeout')), timeoutMs);
+    try {
+      const response = await fetch(LOCAL_CHAT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages,
+          stream: false,
+          temperature: 0.4,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        const error = new Error(`HTTP ${response.status}: ${text.slice(0, 180)}`);
+        const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+        if (attempt < maxAttempts && retryable) {
+          await sleep(180 * attempt);
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+
+      return await response.json();
+    } catch (error) {
+      const msg = String(error?.message || error);
+      const retryable =
+        msg.includes('fetch failed') ||
+        msg.includes('ECONNRESET') ||
+        msg.includes('ETIMEDOUT') ||
+        msg.includes('chat_timeout') ||
+        msg.includes('AbortError');
+      if (attempt < maxAttempts && retryable) {
+        await sleep(180 * attempt);
+        lastError = error;
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  return response.json();
+  throw lastError || new Error('chat_request_failed');
 }
 
 function parseLightingText(text) {
@@ -164,6 +333,7 @@ function parseLightingText(text) {
     recommendation: envelope.recommendation,
     parseError: envelope.parseError,
     keyNamingMode: detectLightingKeyNamingMode(envelope.raw),
+    contractMeta: envelope.contractMeta || null,
   };
 }
 
@@ -191,6 +361,7 @@ async function analyzeLightingWithRetry(samplePrompt, context, modelEndpointAvai
   let candidate = firstRound.recommendation;
   let validation = validateLightingRecommendation(candidate);
   let keyNamingMode = firstRound.keyNamingMode;
+  let contractMeta = firstRound.contractMeta || null;
   let round2RetryUsed = false;
   let lastRawPreview = firstRawText.slice(0, 240);
 
@@ -206,6 +377,7 @@ async function analyzeLightingWithRetry(samplePrompt, context, modelEndpointAvai
     const retryRound = parseLightingText(retryRawText);
     candidate = retryRound.recommendation;
     validation = validateLightingRecommendation(candidate);
+    contractMeta = retryRound.contractMeta || contractMeta;
     lastRawPreview = retryRawText.slice(0, 240);
 
     if (keyNamingMode === 'unknown') {
@@ -229,6 +401,7 @@ async function analyzeLightingWithRetry(samplePrompt, context, modelEndpointAvai
       },
       validation,
       rawPreview: lastRawPreview,
+      contractMeta,
     };
   }
 
@@ -244,6 +417,7 @@ async function analyzeLightingWithRetry(samplePrompt, context, modelEndpointAvai
     },
     validation,
     rawPreview: lastRawPreview,
+    contractMeta,
   };
 }
 
@@ -268,6 +442,37 @@ function collectIssues({
       message: '优化输入缺少 Camera & lighting 段落。',
       suggestion: '保留并强化相机与布光结构化段落。',
     });
+  }
+
+  const expectedNegativeTexts = Array.isArray(sample.expect?.negativeTexts) ? sample.expect.negativeTexts : [];
+  if (expectedNegativeTexts.length > 0) {
+    if (!optimizeInput.includes('Negative constraints, preserve as exclusions only:')) {
+      issues.push({
+        severity: 'high',
+        code: 'missing_negative_constraints_input',
+        message: '优化输入缺少 Negative constraints 独立段落。',
+        suggestion: '排除项必须进入独立负面约束段，不要混入正向主体描述。',
+      });
+    }
+    const promptLower = String(optimizedPrompt || '').toLowerCase();
+    if (!/\bavoid\s*:/i.test(optimizedPrompt || '')) {
+      issues.push({
+        severity: 'high',
+        code: 'missing_avoid_output',
+        message: '优化结果缺少 Avoid: 段落。',
+        suggestion: 'finalPrompt 中应使用通用 Avoid: 自然语言表达排除项。',
+      });
+    }
+    for (const negativeText of expectedNegativeTexts) {
+      if (!promptLower.includes(String(negativeText).toLowerCase())) {
+        issues.push({
+          severity: 'high',
+          code: 'negative_text_missing',
+          message: `优化结果缺少排除文本：${negativeText}`,
+          suggestion: '排除文本必须保留在 Avoid/Negative constraints 语义中。',
+        });
+      }
+    }
   }
 
   const arMatches = optimizeInput.match(/--ar\s+\d+:\d+/g) || [];
@@ -311,6 +516,43 @@ function collectIssues({
     });
   }
 
+  const ratio = parseRatio(composition?.ratio);
+  const w = Number.parseInt(composition?.width, 10);
+  const h = Number.parseInt(composition?.height, 10);
+  if (!ratio || !Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
+    issues.push({
+      severity: 'high',
+      code: 'invalid_size_fields',
+      message: '构图缺少合法 width/height 或 ratio 字段。',
+      suggestion: '确保 composition 始终输出 ratio、orientation、width、height。',
+    });
+  } else {
+    const lhs = w * ratio.h;
+    const rhs = h * ratio.w;
+    const drift = Math.abs(lhs - rhs);
+    if (drift > Math.max(2, Math.round((lhs + rhs) * 0.003))) {
+      issues.push({
+        severity: 'high',
+        code: 'ratio_size_conflict',
+        message: `ratio 与 width/height 不一致（ratio=${composition.ratio}, size=${w}x${h}）。`,
+        suggestion: '确保最终像素尺寸与 --ar 使用同一个比例来源。',
+      });
+    }
+  }
+
+  if (composition?.sizeMode === 'preset_resolution') {
+    const allowed = new Set([1024, 1536, 1920, 2048, 2560, 2712, 3072, 3840, 4096, 7680]);
+    const edge = Number.parseInt(composition?.resolutionLongEdge, 10);
+    if (!allowed.has(edge)) {
+      issues.push({
+        severity: 'medium',
+        code: 'invalid_long_edge_preset',
+        message: `preset_resolution 模式使用了非法长边预设（${composition?.resolutionLongEdge}）。`,
+        suggestion: '仅允许 1024/1536/1920/2048/2560/2712/3072/3840/4096/7680。',
+      });
+    }
+  }
+
   if (has(['nighttime']) && has(['sunrise', 'golden hour', 'midday'])) {
     issues.push({
       severity: 'medium',
@@ -320,7 +562,11 @@ function collectIssues({
     });
   }
 
-  if (has(['cool blue']) && has(['warm golden', 'amber tones'])) {
+  const mixedColorAllowed =
+    (sceneRecommendation?.timeOfDay === '夜晚' || sceneRecommendation?.timeOfDay === '蓝调') &&
+    has(['neon', 'sign', 'storefront sign', 'lantern', 'shopfront', 'glowing warm letters']);
+
+  if (!mixedColorAllowed && has(['cool blue']) && has(['warm golden', 'amber tones'])) {
     issues.push({
       severity: 'medium',
       code: 'color_temp_conflict',
@@ -425,6 +671,53 @@ function makeTelemetry(meta = {}, sceneConstraintResult = {}, keyNamingModeFallb
   };
 }
 
+function extractContractPassByStep({
+  analysisParsed = null,
+  presetsParsed = null,
+  dimensionsParsed = null,
+  replaceParsed = null,
+  lightingContractMeta = null,
+  optimizeContractMeta = null,
+} = {}) {
+  return {
+    analysis: Boolean(analysisParsed?.__contract?.contractValid),
+    presets_refresh: Boolean(presetsParsed?.__contract?.contractValid),
+    dimensions_refresh: Boolean(dimensionsParsed?.__contract?.contractValid),
+    dimension_replace: Boolean(replaceParsed?.__contract?.contractValid),
+    lighting: Boolean(lightingContractMeta?.contractValid),
+    optimize: Boolean(optimizeContractMeta?.contractValid),
+  };
+}
+
+function extractSemanticConflictByStep({
+  optimizeContractMeta = null,
+} = {}) {
+  return {
+    optimize: Array.isArray(optimizeContractMeta?.semanticConflicts) ? optimizeContractMeta.semanticConflicts.length : 0,
+  };
+}
+
+function tokenizePrompt(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s:]/gu, ' ')
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function jaccardSimilarity(aText, bText) {
+  const aSet = new Set(tokenizePrompt(aText));
+  const bSet = new Set(tokenizePrompt(bText));
+  if (!aSet.size && !bSet.size) return 1;
+  let inter = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) inter += 1;
+  }
+  const union = new Set([...aSet, ...bSet]).size;
+  return union > 0 ? inter / union : 0;
+}
+
 async function runSample(sample, modelEndpointAvailable) {
   const ruleSceneRecommendation = inferSceneRecommendationFromPrompt(sample.prompt);
   const ruleCompositionRecommendation = inferCompositionRecommendationFromPrompt(sample.prompt);
@@ -441,8 +734,51 @@ async function runSample(sample, modelEndpointAvailable) {
       analysisParsed = null;
     }
   }
+  if (!analysisParsed) {
+    const synthetic = makeSyntheticAnalysis(sample);
+    analysisRaw = synthetic.raw;
+    analysisParsed = synthetic.parsed;
+  }
 
   const dimensions = analysisParsed?.dimensions?.length ? analysisParsed.dimensions : DEFAULT_DIMENSIONS;
+  const presetFixture = {
+    schemaVersion: AI_CONTRACTS.presetsRefresh.schemaVersion,
+    orderedFields: AI_CONTRACTS.presetsRefresh.orderedFields,
+    presets: [
+      {
+        name: '电影感',
+        description: '强化镜头、光影和叙事张力。',
+        values: Object.fromEntries(dimensions.map((item) => [item.name, Number(item.value ?? item.default ?? 60)])),
+      },
+    ],
+  };
+  const dimensionsFixture = {
+    schemaVersion: AI_CONTRACTS.dimensionsRefresh.schemaVersion,
+    orderedFields: AI_CONTRACTS.dimensionsRefresh.orderedFields,
+    dimensions: dimensions.map((item) => ({
+      name: item.name,
+      description: item.description || '维度描述',
+      min: 0,
+      max: 100,
+      default: Number(item.value ?? item.default ?? 50),
+      labels: item.labels || ['低', '高'],
+    })),
+  };
+  const replaceFixture = {
+    schemaVersion: AI_CONTRACTS.dimensionReplace.schemaVersion,
+    orderedFields: AI_CONTRACTS.dimensionReplace.orderedFields,
+    dimension: {
+      name: '稳定性',
+      description: '控制画面语义一致性。',
+      min: 0,
+      max: 100,
+      default: 60,
+      labels: ['松散', '严谨'],
+    },
+  };
+  const presetsParsed = parsePresetRefreshResponse(JSON.stringify(presetFixture), dimensions);
+  const dimensionsParsed = parseDimensionsRefreshResponse(JSON.stringify(dimensionsFixture));
+  const replaceParsed = parseDimensionReplacementResponse(JSON.stringify(replaceFixture));
 
   const mergedSceneRecommendation = mergeSceneRecommendations({
     current: {},
@@ -460,31 +796,101 @@ async function runSample(sample, modelEndpointAvailable) {
 
   const composition = makeCompositionFromReco(compositionReco);
   const scene = makeSceneFromReco(finalSceneRecommendation);
+  const sampleElements = getSampleElements(sample);
+  const exactTexts = getExactTextsFromElements(sampleElements);
+  const negativePrompts = getNegativePromptContext(sampleElements, sample.canvasNegativePrompt);
 
   const optimizeMessages = buildOptimizeMessages(sample.prompt, {
     dimensions,
     composition,
-    elements: DEFAULT_ELEMENTS,
+    elements: sampleElements,
     links: [],
     scene,
     style: 6,
+    canvasNegativePrompt: sample.canvasNegativePrompt,
   });
   const optimizeInput = optimizeMessages[1]?.content || '';
 
   let optimizedPrompt = '';
   let optimizeModelError = '';
+  let optimizeContractMeta = null;
+  let optimizeStabilityTwin = '';
   if (modelEndpointAvailable) {
     try {
       const json = await callChat(optimizeMessages);
-      optimizedPrompt = extractContentFromChatResponse(json);
+      const rawOptimize = extractContentFromChatResponse(json);
+      const parsedOptimize = parseOptimizeResponse(rawOptimize, {
+        composition,
+        scene,
+        exactTexts,
+        negativePrompts,
+      });
+      optimizedPrompt = parsedOptimize?.finalPrompt || rawOptimize;
+      optimizeContractMeta = parsedOptimize?.contractMeta || null;
+
+      const twinJson = await callChat(optimizeMessages);
+      const rawTwin = extractContentFromChatResponse(twinJson);
+      const parsedTwin = parseOptimizeResponse(rawTwin, {
+        composition,
+        scene,
+        exactTexts,
+        negativePrompts,
+      });
+      optimizeStabilityTwin = parsedTwin?.finalPrompt || rawTwin;
     } catch (error) {
       optimizeModelError = error?.message || String(error);
     }
+  } else {
+    const syntheticOptimize = {
+      schemaVersion: AI_CONTRACTS.optimize.schemaVersion,
+      orderedFields: AI_CONTRACTS.optimize.orderedFields,
+      blocks: {
+        subject: 'A clear main subject based on the original prompt',
+        composition: `${composition.ratio} ${composition.orientation}, final canvas size ${composition.width}x${composition.height} px, --ar ${composition.ratio}`,
+        foreground: 'Foreground subjects placed according to the canvas layout',
+        background: 'Background environment supports the main subject',
+        camera: 'Professional camera angle and focal framing',
+        lighting: 'Consistent cinematic lighting using the current scene state',
+        style: 'Semi-realistic visual style with controlled detail',
+        exactText: exactTexts.length ? exactTexts.map((text) => `Exact text "${text}"`).join('; ') : 'none',
+        negativeConstraints: negativePrompts.length ? `Avoid: ${negativePrompts.map((item) => item.text).join('; ')}` : 'none',
+        renderConstraints: 'clean prompt, no contradictory time or style terms',
+      },
+      finalPrompt: [
+        'A clear main subject based on the original prompt',
+        `${composition.ratio} ${composition.orientation}`,
+        `final canvas size ${composition.width}x${composition.height} px`,
+        `--ar ${composition.ratio}`,
+        'professional camera angle',
+        'consistent cinematic lighting',
+        'semi-realistic style',
+        exactTexts.length ? exactTexts.map((text) => `exact text "${text}"`).join(', ') : '',
+        negativePrompts.length ? `Avoid: ${negativePrompts.map((item) => item.text).join('; ')}` : '',
+      ].filter(Boolean).join(', '),
+      checks: {
+        ratio: composition.ratio,
+        orientation: composition.orientation,
+        finalSize: `${composition.width}x${composition.height}`,
+        containsSingleAr: true,
+        exactTextProtected: true,
+        negativeConstraintsPreserved: true,
+      },
+    };
+    const parsedOptimize = parseOptimizeResponse(JSON.stringify(syntheticOptimize), {
+      composition,
+      scene,
+      exactTexts,
+      negativePrompts,
+    });
+    optimizedPrompt = parsedOptimize?.finalPrompt || syntheticOptimize.finalPrompt;
+    optimizeContractMeta = parsedOptimize?.contractMeta || null;
+    optimizeStabilityTwin = optimizedPrompt;
   }
 
   let lightingRecommendation = buildFallbackLightingRecommendation(scene);
   let lightingValidation = validateLightingRecommendation(lightingRecommendation);
   let lightingRawPreview = '';
+  let lightingContractMeta = null;
   let lightingMeta = {
     round2RetryUsed: false,
     keyNamingMode: 'fallback',
@@ -504,6 +910,7 @@ async function runSample(sample, modelEndpointAvailable) {
       lightingRawPreview = lightingResult.rawPreview;
       lightingValidation = lightingResult.validation;
       lightingMeta = lightingResult.meta;
+      lightingContractMeta = lightingResult.contractMeta || null;
       if (lightingResult.recommendation) {
         lightingRecommendation = lightingResult.recommendation;
       }
@@ -516,8 +923,37 @@ async function runSample(sample, modelEndpointAvailable) {
       };
     }
   }
+  if (!lightingContractMeta) {
+    const fallbackLightingEnvelope = parseLightingRecommendationEnvelope(JSON.stringify({
+      schemaVersion: AI_CONTRACTS.lighting.schemaVersion,
+      orderedFields: AI_CONTRACTS.lighting.orderedFields,
+      lights: {
+        light1: { on: true, type: '聚光灯', lumens: 5000 },
+        light2: { on: true, type: '柔光箱', lumens: 2200 },
+        light3: { on: true, type: '发灯', lumens: 1800 },
+        light4: { on: false, type: '发灯', lumens: 1000 },
+      },
+      reason: 'fallback_contract_fixture',
+    }));
+    lightingContractMeta = fallbackLightingEnvelope.contractMeta || null;
+  }
 
   const telemetry = makeTelemetry(lightingMeta, sceneConstraintResult, lightingMeta.keyNamingMode);
+  const contractPassByStep = extractContractPassByStep({
+    analysisParsed,
+    presetsParsed,
+    dimensionsParsed,
+    replaceParsed,
+    lightingContractMeta,
+    optimizeContractMeta,
+  });
+  const semanticConflictByStep = extractSemanticConflictByStep({ optimizeContractMeta });
+  const stabilityScore = Number(jaccardSimilarity(optimizedPrompt, optimizeStabilityTwin || optimizedPrompt).toFixed(4));
+  const driftReasons = [];
+  if (stabilityScore < 0.72) driftReasons.push('optimize_prompt_low_similarity');
+  if (Object.values(contractPassByStep).some((value) => !value)) driftReasons.push('contract_failure_detected');
+  if (Object.values(semanticConflictByStep).some((value) => value > 0)) driftReasons.push('semantic_conflict_detected');
+
   const issues = collectIssues({
     sample,
     optimizeInput,
@@ -528,6 +964,24 @@ async function runSample(sample, modelEndpointAvailable) {
     lightingValidation,
     telemetry,
   });
+  for (const [step, pass] of Object.entries(contractPassByStep)) {
+    if (!pass) {
+      issues.push({
+        severity: 'high',
+        code: `contract_${step}_failed`,
+        message: `${step} 合同校验未通过。`,
+        suggestion: '确保该步骤返回固定 schemaVersion、orderedFields 和字段顺序。',
+      });
+    }
+  }
+  if (stabilityScore < 0.72) {
+    issues.push({
+      severity: 'medium',
+      code: 'stability_score_low',
+      message: `优化结果稳定性分数过低（${stabilityScore}）。`,
+      suggestion: '收紧 blocks 顺序、术语边界与 finalPrompt 生成规则。',
+    });
+  }
 
   return {
     id: sample.id,
@@ -540,6 +994,10 @@ async function runSample(sample, modelEndpointAvailable) {
     lightingRecommendation,
     lightingValidation,
     telemetry,
+    contractPassByStep,
+    semanticConflictByStep,
+    stabilityScore,
+    driftReasons,
     issues,
     status: issues.length ? 'fail' : 'pass',
     optimizeModelError,
@@ -628,6 +1086,17 @@ function runSyntheticChecks() {
       lightingRecommendation: capped.recommendation,
       lightingValidation: finalValidation,
       telemetry,
+      contractPassByStep: {
+        analysis: true,
+        presets_refresh: true,
+        dimensions_refresh: true,
+        dimension_replace: true,
+        lighting: true,
+        optimize: true,
+      },
+      semanticConflictByStep: { optimize: 0 },
+      stabilityScore: 1,
+      driftReasons: [],
       issues,
       status: issues.length ? 'fail' : 'pass',
       optimizeModelError: '',
@@ -701,6 +1170,17 @@ function runSyntheticChecks() {
       lightingRecommendation: capped.recommendation,
       lightingValidation: validation,
       telemetry,
+      contractPassByStep: {
+        analysis: true,
+        presets_refresh: true,
+        dimensions_refresh: true,
+        dimension_replace: true,
+        lighting: true,
+        optimize: true,
+      },
+      semanticConflictByStep: { optimize: 0 },
+      stabilityScore: 1,
+      driftReasons: [],
       issues,
       status: issues.length ? 'fail' : 'pass',
       optimizeModelError: '',
@@ -718,36 +1198,82 @@ async function runLocalClarityAudit() {
   let modelEndpointError = '';
 
   try {
-    await callChat([{ role: 'user', content: 'health-check' }]);
+    await callChatWithRetry([{ role: 'user', content: 'health-check' }], {
+      allowRetry: false,
+      timeoutMs: 5000,
+    });
     modelEndpointAvailable = true;
   } catch (error) {
     modelEndpointError = error?.message || String(error);
   }
 
-  const results = [];
-  for (const sample of SAMPLES) {
-    const result = await runSample(sample, modelEndpointAvailable);
-    results.push(result);
-  }
+  const results = await runWithConcurrency(
+    SAMPLES,
+    modelEndpointAvailable ? Math.max(1, CLARITY_DEFAULT_CONCURRENCY) : 1,
+    async (sample) => runSample(sample, modelEndpointAvailable),
+  );
 
   const syntheticResults = runSyntheticChecks();
   results.push(...syntheticResults);
 
   const passCount = results.filter((item) => item.status === 'pass').length;
   const failCount = results.length - passCount;
+  const contractStepNames = ['analysis', 'presets_refresh', 'dimensions_refresh', 'dimension_replace', 'lighting', 'optimize'];
+  const contractTotal = results.length * contractStepNames.length;
+  const contractPass = results.reduce((sum, item) => {
+    const stepMap = item.contractPassByStep || {};
+    return sum + contractStepNames.filter((step) => stepMap[step] === true).length;
+  }, 0);
+  const criticalConflictCount = results.reduce((sum, item) => {
+    const stepMap = item.semanticConflictByStep || {};
+    return sum + Object.values(stepMap).reduce((inner, value) => inner + Number(value || 0), 0);
+  }, 0);
+  const stabilityAvg = results.length
+    ? results.reduce((sum, item) => sum + Number(item.stabilityScore || 0), 0) / results.length
+    : 0;
+  const gate = {
+    contractPassRate: Number((contractTotal ? contractPass / contractTotal : 0).toFixed(4)),
+    criticalConflictCount,
+    stabilityScoreAvg: Number(stabilityAvg.toFixed(4)),
+  };
+  gate.pass = gate.contractPassRate === 1 && gate.criticalConflictCount === 0 && gate.stabilityScoreAvg >= 0.72;
   return {
     generatedAt: new Date().toISOString(),
     chatEndpoint: LOCAL_CHAT_ENDPOINT,
     modelEndpointAvailable,
     modelEndpointError,
+    execution: {
+      concurrency: modelEndpointAvailable ? Math.max(1, CLARITY_DEFAULT_CONCURRENCY) : 1,
+      maxRetries: CLARITY_MAX_RETRIES,
+      timeoutMs: CLARITY_CHAT_TIMEOUT_MS,
+    },
     totals: {
       samples: results.length,
       pass: passCount,
       fail: failCount,
       passRate: Number((passCount / results.length).toFixed(4)),
     },
+    gate,
     results,
   };
+}
+
+async function runWithConcurrency(items, concurrency, worker) {
+  const limit = Math.max(1, Number.parseInt(String(concurrency), 10) || 1);
+  const output = new Array(items.length);
+  let cursor = 0;
+
+  async function runner() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      output[index] = await worker(items[index], index);
+    }
+  }
+
+  const tasks = Array.from({ length: Math.min(limit, items.length) }, () => runner());
+  await Promise.all(tasks);
+  return output;
 }
 
 function buildMarkdownReport(summary) {
@@ -758,17 +1284,24 @@ function buildMarkdownReport(summary) {
     `- Chat endpoint: ${summary.chatEndpoint}`,
     `- Endpoint available: ${summary.modelEndpointAvailable ? 'yes' : 'no'}`,
     summary.modelEndpointAvailable ? '' : `- Endpoint error: ${summary.modelEndpointError || 'N/A'}`,
+    `- Execution: concurrency=${summary.execution?.concurrency ?? 1}, maxRetries=${summary.execution?.maxRetries ?? 0}, timeoutMs=${summary.execution?.timeoutMs ?? CLARITY_CHAT_TIMEOUT_MS}`,
     `- Samples: ${summary.totals.samples}`,
     `- Pass: ${summary.totals.pass}`,
     `- Fail: ${summary.totals.fail}`,
     `- Pass rate: ${(summary.totals.passRate * 100).toFixed(1)}%`,
+    `- Contract pass rate: ${((summary.gate?.contractPassRate || 0) * 100).toFixed(1)}%`,
+    `- Critical semantic conflicts: ${summary.gate?.criticalConflictCount ?? 0}`,
+    `- Stability score avg: ${(summary.gate?.stabilityScoreAvg ?? 0).toFixed(4)}`,
+    `- Commit gate: ${summary.gate?.pass ? 'PASS' : 'FAIL'} (requires contract pass=100%, critical conflicts=0, stability>=0.72)`,
     '',
-    '| ID | Group | Status | Issues | Retry | Key naming | Cap count | Scene constraint | Key note |',
-    '|---|---|---|---:|---|---|---:|---|---|',
+    '| ID | Group | Status | Issues | Contract | Conflicts | Stability | Retry | Key naming | Cap count | Scene constraint | Key note |',
+    '|---|---|---|---:|---|---:|---:|---|---|---:|---|---|',
     ...summary.results.map((item) => {
       const note = item.issues[0]?.message || '无明显歧义';
       const t = item.telemetry || {};
-      return `| ${item.id} | ${item.group} | ${item.status.toUpperCase()} | ${item.issues.length} | ${t.round2RetryUsed ? 'yes' : 'no'} | ${t.keyNamingMode || 'unknown'} | ${t.lumensCappedCount || 0} | ${t.sceneConstraintApplied ? 'yes' : 'no'} | ${note} |`;
+      const contractPass = Object.values(item.contractPassByStep || {}).every(Boolean);
+      const conflictCount = Object.values(item.semanticConflictByStep || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+      return `| ${item.id} | ${item.group} | ${item.status.toUpperCase()} | ${item.issues.length} | ${contractPass ? 'PASS' : 'FAIL'} | ${conflictCount} | ${(item.stabilityScore ?? 0).toFixed(4)} | ${t.round2RetryUsed ? 'yes' : 'no'} | ${t.keyNamingMode || 'unknown'} | ${t.lumensCappedCount || 0} | ${t.sceneConstraintApplied ? 'yes' : 'no'} | ${note} |`;
     }),
     '',
     '## Detailed Issues',

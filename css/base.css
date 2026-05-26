@@ -158,6 +158,38 @@ ul, ol {
   border-color: var(--color-border);
 }
 
+[data-theme="dark"] .poster-entry-card {
+  background: linear-gradient(145deg, rgba(29, 26, 42, 0.96), rgba(24, 22, 36, 0.96));
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .ui-mode-switch {
+  background: rgba(22, 19, 31, 0.9);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .template-item {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .poster-inspector,
+[data-theme="dark"] .poster-group,
+[data-theme="dark"] .poster-floating-panel,
+[data-theme="dark"] .template-confirm-dialog {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .poster-tool-btn {
+  background: rgba(31, 27, 46, 0.9);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .poster-group > summary {
+  background: linear-gradient(135deg, rgba(255, 143, 171, 0.08), rgba(137, 207, 243, 0.08));
+  border-bottom-color: transparent;
+}
+
 /* Hover backgrounds that use hardcoded #faf5ff */
 [data-theme="dark"] .btn-secondary:hover,
 [data-theme="dark"] .history-item:hover,
@@ -194,6 +226,17 @@ ul, ol {
   background-image:
     repeating-linear-gradient(0deg, transparent, transparent 14px, rgba(80, 70, 120, 0.4) 14px, rgba(80, 70, 120, 0.4) 15px),
     repeating-linear-gradient(90deg, transparent, transparent 14px, rgba(80, 70, 120, 0.4) 14px, rgba(80, 70, 120, 0.4) 15px);
+}
+
+[data-theme="dark"] #scene-3d-preview {
+  background: linear-gradient(180deg, rgba(30, 28, 44, 0.9), rgba(20, 18, 34, 0.95));
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .scene-3d-status {
+  background: rgba(22, 19, 31, 0.72);
+  border-color: var(--color-border);
+  color: var(--color-text-tertiary);
 }
 
 /* Scene controls — labels and pill buttons */
@@ -334,4 +377,57 @@ ul, ol {
 /* ---- Scrollbar ---- */
 [data-theme="dark"] ::-webkit-scrollbar-thumb {
   background: var(--color-border);
+}
+
+/* ============================================
+   Pro UI mode global overrides
+   ============================================ */
+
+[data-ui-mode="pro"] body {
+  background: var(--gradient-candy-bg);
+}
+
+[data-ui-mode="pro"] body::before {
+  display: none;
+}
+
+[data-ui-mode="pro"] ::selection {
+  background: rgba(52, 52, 52, 0.18);
+  color: var(--color-text-primary);
+}
+
+[data-ui-mode="pro"] a:hover {
+  color: var(--color-text-primary);
+}
+
+[data-ui-mode="pro"] select,
+[data-ui-mode="pro"] input[type="text"],
+[data-ui-mode="pro"] input[type="password"],
+[data-ui-mode="pro"] input[type="number"],
+[data-ui-mode="pro"] textarea {
+  background: var(--color-bg-input);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+[data-ui-mode="pro"] option {
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+[data-ui-mode="pro"] .card,
+[data-ui-mode="pro"] .guide-card,
+[data-ui-mode="pro"] .light-card,
+[data-ui-mode="pro"] .history-item,
+[data-ui-mode="pro"] .preset-card,
+[data-ui-mode="pro"] .poster-inspector,
+[data-ui-mode="pro"] .poster-group,
+[data-ui-mode="pro"] .poster-floating-panel,
+[data-ui-mode="pro"] .template-confirm-dialog {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+}
+
+[data-ui-mode="pro"] .poster-group > summary {
+  background: var(--color-bg-input);
 }

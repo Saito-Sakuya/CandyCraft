@@ -7,14 +7,40 @@
 import { normalizeSceneRecommendation } from './scene-recommendation.js';
 import { normalizeCompositionRecommendation } from './composition-recommendation.js';
 import { normalizeLightingRecommendation } from './lighting-recommendation.js';
+import {
+  AI_CONTRACTS,
+  tryParseJsonWithExtractors,
+  validateContractEnvelope,
+  auditPromptSemantics,
+  makeContractMeta,
+} from './ai-contract.js';
+
+export const ANALYSIS_SCHEMA_VERSION = AI_CONTRACTS.analysis.schemaVersion;
+export const ANALYSIS_ORDERED_FIELDS = AI_CONTRACTS.analysis.orderedFields;
+export const PRESETS_REFRESH_SCHEMA_VERSION = AI_CONTRACTS.presetsRefresh.schemaVersion;
+export const PRESETS_REFRESH_ORDERED_FIELDS = AI_CONTRACTS.presetsRefresh.orderedFields;
+export const DIMENSIONS_REFRESH_SCHEMA_VERSION = AI_CONTRACTS.dimensionsRefresh.schemaVersion;
+export const DIMENSIONS_REFRESH_ORDERED_FIELDS = AI_CONTRACTS.dimensionsRefresh.orderedFields;
+export const DIMENSION_REPLACE_SCHEMA_VERSION = AI_CONTRACTS.dimensionReplace.schemaVersion;
+export const DIMENSION_REPLACE_ORDERED_FIELDS = AI_CONTRACTS.dimensionReplace.orderedFields;
+export const LIGHTING_SCHEMA_VERSION = AI_CONTRACTS.lighting.schemaVersion;
+export const LIGHTING_ORDERED_FIELDS = AI_CONTRACTS.lighting.orderedFields;
+export const OPTIMIZE_SCHEMA_VERSION = AI_CONTRACTS.optimize.schemaVersion;
+export const OPTIMIZE_ORDERED_FIELDS = AI_CONTRACTS.optimize.orderedFields;
+export const OPTIMIZE_BLOCK_ORDER = AI_CONTRACTS.optimize.blockOrder;
 
 /* ---- Analysis Phase System Prompt (v3) ---- */
 const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾问。
 用户会给你一段文生图提示词，请你分析该提示词的特点和可优化方向。
 
-请返回一个 JSON 对象（不是数组），包含以下字段：
+请返回一个 JSON 对象（不是数组），并严格按以下顶层字段顺序输出：
+schemaVersion -> orderedFields -> dimensions -> elements -> presets -> sceneRecommendation -> compositionRecommendation
 
-1. "dimensions": 6~8 个可调节的优化维度数组，每个维度包含：
+其中：
+- schemaVersion 必须固定为 "${ANALYSIS_SCHEMA_VERSION}"
+- orderedFields 必须固定为 ${JSON.stringify(ANALYSIS_ORDERED_FIELDS)}
+
+1. "dimensions": 必须固定为 8 个可调节维度数组，每个维度包含：
    - name: 维度名称（简短，2-4个字，如"画面细节""光影层次""色调氛围""构图张力""材质表现""叙事深度""风格强度""氛围渲染"）
    - description: 一句话说明该维度的含义
    - min: 0
@@ -31,6 +57,10 @@ const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾
    - role: "主角" 或 "配角" 或 "背景景物"
    - position: { "x": 0-100, "y": 0-100 } 你建议的画面位置（百分比坐标）
    - size: { "w": 10-40, "h": 15-50 } 你建议的框体尺寸（百分比）
+   - textPassthrough（可选）: 当提示词明确要求出现确定文字时使用
+     - enabled: true
+     - text: 原文字符串，必须保留大小写、标点、换行，不翻译不改写
+     - typographyHint: 简短字体/排版提示（可选）
 
    规则：
    - 人物/角色 → type: "character", layer: "foreground"
@@ -38,6 +68,8 @@ const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾
    - 如果提示词暗示了场景环境（如"窗外的雨天城市""废弃城堡"），也要生成对应的后景元素
    - 至少输出 1 个前景元素和 1 个后景元素（如果文意合理的话）
    - 如果提示词中没有明确人物，可把画面主体作为前景元素
+   - 只有用户明确给出要出现的文字（如 写着“夜间营业”、标题为“糖果工坊”、text reads "OPEN"、says "SALE"）才输出 textPassthrough
+   - 模糊文字诉求（如"一些宣传文字""英文标题感"）不要启用 textPassthrough
 
 3. "presets": 2~4 个预设优化方案数组，每个包含：
    - name: 方案名称（2-4个字，如"电影海报""水彩插画""极简美学"）
@@ -59,7 +91,7 @@ const ANALYSIS_SYSTEM_PROMPT = `你是一位专业的文生图提示词分析顾
 
 注意：
 1. 维度要针对该提示词的具体内容来设定，不要用通用模板
-2. default 值要准确反映当前提示词的实际水平
+2. dimensions 必须严格输出 8 项，不多不少
 3. presets 中的 values 的 key 必须与 dimensions 中的 name 完全一致
 4. 不要使用 emoji
 5. 不要使用浮夸或AI味过重的措辞（如"打造""赋能""沉浸式"）
@@ -121,33 +153,63 @@ function buildOptimizeStyleSuffix(level) {
 /* ---- Optimization Phase System Prompt (v2.1) ---- */
 const OPTIMIZE_SYSTEM_PROMPT_BASE = `你是一位资深的文生图提示词优化师，擅长将普通提示词改写为高质量、专业级的生图指令。
 
-你的任务：根据用户提供的原始提示词和各项参数，输出一段优化后的提示词。
+你的任务：根据用户提供的原始提示词和各项参数，输出一个严格 JSON 合同（schema），其中包含分块结果与最终提示词。
 
-用户会提供以下信息：
-- 原始提示词
-- 各维度参数值（0-100）
-- 构图比例（横向/纵向/方形）
-- 人物布局信息（角色名、位置、大小、角色间的互动关系）
-- 相机机位和布光信息
-- 目标风格（动漫或真实）
+只输出 JSON 对象，顶层字段顺序固定：
+schemaVersion -> orderedFields -> blocks -> finalPrompt -> checks
+
+其中：
+- schemaVersion 固定为 "${OPTIMIZE_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(OPTIMIZE_ORDERED_FIELDS)}
+- blocks 的 key 必须按以下顺序完整输出：
+${OPTIMIZE_BLOCK_ORDER.join(' -> ')}
+
+格式如下：
+{
+  "schemaVersion": "${OPTIMIZE_SCHEMA_VERSION}",
+  "orderedFields": ${JSON.stringify(OPTIMIZE_ORDERED_FIELDS)},
+  "blocks": {
+    "subject": "...",
+    "composition": "...",
+    "foreground": "...",
+    "background": "...",
+    "camera": "...",
+    "lighting": "...",
+    "style": "...",
+    "exactText": "...",
+    "negativeConstraints": "...",
+    "renderConstraints": "..."
+  },
+  "finalPrompt": "单行完整提示词（可直接用于生图）",
+  "checks": {
+    "ratio": "16:9",
+    "orientation": "landscape",
+    "finalSize": "1536x864",
+    "containsSingleAr": true,
+    "exactTextProtected": true,
+    "negativeConstraintsPreserved": true
+  }
+}
 
 优化规则：
-1. 先对原始语句做基础的语法和表达优化，使其更加清晰流畅
-2. 根据各维度的参数值（0-100）调整对应方面的描述详细程度和侧重点
-3. 将前景元素（人物/物品）自然地融入提示词中，体现其位置关系和互动，不要机械罗列坐标
-4. 将后景元素（景物/建筑/环境）作为背景描述融入提示词
-5. 如果有焦点物品，用"focus on..."描述视觉重心
+1. 先对原始语句做基础语法优化，使表达清晰流畅
+2. 根据维度参数调整描述细节和侧重点
+3. 前景元素自然融入提示词，避免机械罗列坐标
+4. 后景元素作为背景语义补全
+5. 焦点物品用自然语言明确视觉重心
 6. 同一景深平面的元素应在描述中体现空间关联
 7. 将相机机位、焦距、景别翻译为专业摄影术语
-8. 将光圈、布光方案、色温和时段翻译为专业的光影描述
-9. 将构图比例反映在画面描述中
-10. 保持提示词的核心创意意图不变
-11. 输出应当是自然的、可直接用于生图的完整提示词
-12. 不要堆砌无意义的关键词
-13. 不要使用 emoji
-14. 不要使用"打造""赋能""沉浸式""震撼"等过度修饰的词汇
-15. 如果原始提示词是中文，优化后输出英文（因为大多数生图模型对英文支持更好），但保持核心含义
-16. 直接输出优化后的提示词，不要输出分析过程或解释`;
+8. 将光圈、布光、色温、时段翻译为专业光影描述
+9. finalPrompt 中仅允许一个 --ar，且与构图比例一致
+10. 保持提示词核心创意不变
+11. 不堆砌无意义关键词，不使用 emoji
+12. 不使用"打造""赋能""沉浸式""震撼"等过度修饰词
+13. 如果原始提示词是中文，finalPrompt 输出英文，但保持核心含义
+14. 如果存在 Exact text blocks / textPassthrough，文本块原文必须原封不动保留，不翻译、不改写、不纠错、不改标点或换行
+15. 如果存在 Negative constraints，必须只作为排除约束表达在 negativeConstraints block 和 finalPrompt 的 Avoid: 段中；不要把排除内容写进 subject/foreground/background 等正向描述
+16. 排除约束优先于动漫/写实风格滑杆；若冲突，必须移除被排除的风格术语
+17. 使用通用 Avoid: 自然语言，不要默认追加 Midjourney --no
+18. 禁止输出 JSON 以外的解释文本`;
 
 
 
@@ -166,6 +228,221 @@ export function buildAnalysisMessages(userPrompt, styleLevel = 3) {
 }
 
 /**
+ * Build messages for presets-only refresh.
+ * Keeps current dimensions and asks model to regenerate style presets only.
+ */
+export function buildPresetRefreshMessages(userPrompt, context = {}, styleLevel = 3) {
+  const dims = Array.isArray(context.dimensions) ? context.dimensions : [];
+  const currentPresets = Array.isArray(context.presets) ? context.presets : [];
+  const dimNames = dims.map((item) => item?.name).filter(Boolean);
+
+  const systemPrompt = `你是文生图提示词预设方案设计器。
+请基于用户原始提示词和已存在的维度定义，重新生成预设方案。
+
+只输出 JSON 对象，且顶层字段顺序固定：
+schemaVersion -> orderedFields -> presets
+
+其中：
+- schemaVersion 固定为 "${PRESETS_REFRESH_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(PRESETS_REFRESH_ORDERED_FIELDS)}
+
+格式如下：
+{
+  "schemaVersion": "${PRESETS_REFRESH_SCHEMA_VERSION}",
+  "orderedFields": ${JSON.stringify(PRESETS_REFRESH_ORDERED_FIELDS)},
+  "presets": [
+    {
+      "name": "2-4字名称",
+      "description": "一句话说明",
+      "values": {
+        "维度A": 0-100,
+        "维度B": 0-100
+      }
+    }
+  ]
+}
+
+约束：
+1. presets 返回 2~4 项
+2. values 的 key 必须且只能使用以下维度名：${JSON.stringify(dimNames)}
+3. 每个值必须是 0~100 的整数
+4. 禁止 markdown 代码块，禁止额外说明`;
+
+  const userMessage = `原始提示词:
+${userPrompt}
+
+当前维度定义:
+${JSON.stringify(dims, null, 2)}
+
+当前预设(供参考，可改写):
+${JSON.stringify(currentPresets, null, 2)}
+
+目标风格强度:
+${styleLevel}/10`;
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+}
+
+/**
+ * Build messages for dimensions-only refresh.
+ * Returns exactly 8 dimensions.
+ */
+export function buildDimensionsRefreshMessages(userPrompt, context = {}, styleLevel = 3) {
+  const currentDims = Array.isArray(context.dimensions) ? context.dimensions : [];
+  const systemPrompt = `你是文生图提示词维度分析器。
+请仅刷新“调节维度”，不要输出人物元素、预设或其他字段。
+
+只输出 JSON 对象，且顶层字段顺序固定：
+schemaVersion -> orderedFields -> dimensions
+
+其中：
+- schemaVersion 固定为 "${DIMENSIONS_REFRESH_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(DIMENSIONS_REFRESH_ORDERED_FIELDS)}
+
+格式如下：
+{
+  "schemaVersion": "${DIMENSIONS_REFRESH_SCHEMA_VERSION}",
+  "orderedFields": ${JSON.stringify(DIMENSIONS_REFRESH_ORDERED_FIELDS)},
+  "dimensions": [
+    {
+      "name": "2-4字",
+      "description": "一句话说明",
+      "min": 0,
+      "max": 100,
+      "default": 0-100,
+      "labels": ["低端描述", "高端描述"]
+    }
+  ]
+}
+
+硬性要求：
+1. dimensions 必须严格 8 项
+2. min/max 固定 0/100
+3. default 必须是 0~100 整数
+4. labels 必须恰好2项
+5. 禁止 markdown 代码块，禁止解释`;
+
+  const userMessage = `原始提示词:
+${userPrompt}
+
+当前维度(供参考):
+${JSON.stringify(currentDims, null, 2)}
+
+目标风格强度:
+${styleLevel}/10`;
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+}
+
+/**
+ * Build messages for iterative re-analysis over an existing analysis snapshot.
+ * Returns full strict analysis schema.
+ */
+export function buildIterationMessages(userPrompt, context = {}, iterationRequest = '', styleLevel = 3) {
+  const snapshot = {
+    dimensions: Array.isArray(context.dimensions) ? context.dimensions : [],
+    elements: Array.isArray(context.elements) ? context.elements : [],
+    presets: Array.isArray(context.presets) ? context.presets : [],
+    sceneRecommendation: context.sceneRecommendation || null,
+    compositionRecommendation: context.compositionRecommendation || null,
+  };
+
+  const systemPrompt = `你是文生图提示词迭代分析助手。
+你会收到一份“当前分析快照”和“本轮迭代诉求”，请输出新的完整分析 JSON。
+
+必须严格按以下顶层字段顺序输出：
+schemaVersion -> orderedFields -> dimensions -> elements -> presets -> sceneRecommendation -> compositionRecommendation
+
+其中：
+- schemaVersion 固定为 "${ANALYSIS_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(ANALYSIS_ORDERED_FIELDS)}
+- dimensions 必须严格 8 项
+- presets.values 的 key 必须与 dimensions.name 完全一致
+- 只输出 JSON，不要 markdown 代码块，不要解释`;
+
+  const userMessage = `原始提示词:
+${userPrompt}
+
+当前分析快照:
+${JSON.stringify(snapshot, null, 2)}
+
+本轮迭代诉求:
+${iterationRequest || '在不偏离原意的前提下提升可控性与一致性' }
+
+目标风格强度:
+${styleLevel}/10`;
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+}
+
+/**
+ * Build messages for replacing a single dimension while preserving total count=8.
+ */
+export function buildReplaceDimensionMessages(userPrompt, context = {}, targetDimensionName = '', replaceRequest = '', styleLevel = 3) {
+  const currentDims = Array.isArray(context.dimensions) ? context.dimensions : [];
+  const systemPrompt = `你是文生图提示词维度替换助手。
+请只返回“一个新维度”用于替换目标维度，不要输出数组。
+
+只输出 JSON 对象，且顶层字段顺序固定：
+schemaVersion -> orderedFields -> dimension
+
+其中：
+- schemaVersion 固定为 "${DIMENSION_REPLACE_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(DIMENSION_REPLACE_ORDERED_FIELDS)}
+
+格式如下：
+{
+  "schemaVersion": "${DIMENSION_REPLACE_SCHEMA_VERSION}",
+  "orderedFields": ${JSON.stringify(DIMENSION_REPLACE_ORDERED_FIELDS)},
+  "dimension": {
+    "name": "2-4字",
+    "description": "一句话说明",
+    "min": 0,
+    "max": 100,
+    "default": 0-100,
+    "labels": ["低端描述", "高端描述"]
+  }
+}
+
+约束：
+1. 输出仅包含 dimension 字段
+2. min/max 固定 0/100
+3. default 必须是 0~100 整数
+4. labels 必须恰好2项
+5. name 不能与现有其它维度重名
+6. 禁止 markdown 代码块，禁止解释`;
+
+  const userMessage = `原始提示词:
+${userPrompt}
+
+当前维度:
+${JSON.stringify(currentDims, null, 2)}
+
+目标替换维度:
+${targetDimensionName}
+
+替换诉求:
+${replaceRequest || '替换为更有区分度且可操作的维度'}
+
+目标风格强度:
+${styleLevel}/10`;
+
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+}
+
+/**
  * Build second-round messages for light tuning recommendation.
  * @param {string} userPrompt
  * @param {Object} context
@@ -176,8 +453,17 @@ export function buildLightingMessages(userPrompt, context = {}) {
 
   const systemPrompt = `你是一位影视布光顾问。请基于用户提示词和第一轮分析上下文，输出逐灯设置建议。
 
-只输出 JSON 对象，格式如下：
+只输出 JSON 对象，且顶层字段顺序固定：
+schemaVersion -> orderedFields -> lights -> reason
+
+其中：
+- schemaVersion 固定为 "${LIGHTING_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(LIGHTING_ORDERED_FIELDS)}
+
+格式如下：
 {
+  "schemaVersion": "${LIGHTING_SCHEMA_VERSION}",
+  "orderedFields": ${JSON.stringify(LIGHTING_ORDERED_FIELDS)},
   "lights": {
     "light1": { "on": true, "type": "聚光灯", "lumens": 5000 },
     "light2": { "on": true, "type": "柔光箱", "lumens": 2200 },
@@ -193,7 +479,7 @@ export function buildLightingMessages(userPrompt, context = {}) {
 3. on 必须是布尔值
 4. lights 必须返回 4 盏灯，优先使用 light1/light2/light3/light4 命名
 5. 兼容旧命名 key/fill/back/hair 也可接受，但优先输出 light1~4
-6. 不要输出 markdown 代码块，不要输出解释文本`;
+6. 禁止 markdown 代码块，禁止解释文本`;
 
   const userMessage = `原始提示词:
 ${userPrompt}
@@ -220,8 +506,17 @@ export function buildLightingRetryMessages(userPrompt, context = {}, failureSumm
 
   const systemPrompt = `你是影视布光纠错器。上一次输出不符合结构，请严格按 schema 返回。
 
-只输出 JSON：
+只输出 JSON，顶层字段顺序固定：
+schemaVersion -> orderedFields -> lights -> reason
+
+其中：
+- schemaVersion 固定为 "${LIGHTING_SCHEMA_VERSION}"
+- orderedFields 固定为 ${JSON.stringify(LIGHTING_ORDERED_FIELDS)}
+
+格式如下：
 {
+  "schemaVersion": "${LIGHTING_SCHEMA_VERSION}",
+  "orderedFields": ${JSON.stringify(LIGHTING_ORDERED_FIELDS)},
   "lights": {
     "light1": { "on": true, "type": "聚光灯", "lumens": 5000 },
     "light2": { "on": true, "type": "柔光箱", "lumens": 2200 },
@@ -262,13 +557,13 @@ ${failureSummary || '结构不完整或字段非法'}`;
  * @param {string} userPrompt — original prompt
  * @param {Object} params — all optimization parameters
  * @param {Array} params.dimensions — slider dimension values
- * @param {string} params.composition — '16:9' | '9:16' | '1:1'
+ * @param {string|Object} params.composition — composition ratio or final pixel-size object
  * @param {Array} params.elements — element layout data (foreground + background)
  * @param {Array} params.links — element relationship/depth links
  * @param {Object} params.scene — camera/aperture/lighting data
  */
 export function buildOptimizeMessages(userPrompt, params) {
-  const { dimensions, composition, elements, links, scene, style = 3 } = params;
+  const { dimensions, composition, elements, links, scene, style = 3, canvasNegativePrompt = null } = params;
 
   const styleLevel = typeof style === 'number' ? style : 3;
   const styleLabel = `动漫/写实程度 ${styleLevel}/10（${styleLevel <= 3 ? '偏动漫' : styleLevel <= 6 ? '半写实' : '偏写实'}）`;
@@ -285,11 +580,13 @@ export function buildOptimizeMessages(userPrompt, params) {
   if (typeof composition === 'object' && composition !== null) {
     const r = composition.ratio || '16:9';
     const o = composition.orientation || 'landscape';
-    const res = composition.resolution || '';
+    const widthPx = Number.isFinite(composition.width) ? composition.width : '';
+    const heightPx = Number.isFinite(composition.height) ? composition.height : '';
     const oLabel = o === 'portrait' ? 'portrait' : o === 'square' ? 'square' : 'landscape';
-    compDesc = `${r} ${oLabel}${res ? `, ${res}` : ''} (--ar ${r})`;
+    const finalSizeText = widthPx && heightPx ? `final canvas size ${widthPx}x${heightPx} px` : '';
+    compDesc = `${r} ${oLabel}, aspect ratio ${r}, --ar ${r}${finalSizeText ? `, ${finalSizeText}` : ''}`;
   } else {
-    const compMap = { '16:9': '16:9 landscape (--ar 16:9)', '9:16': '9:16 portrait (--ar 9:16)', '1:1': '1:1 square (--ar 1:1)' };
+    const compMap = { '16:9': '16:9 landscape (--ar 16:9)', '2:3': '2:3 portrait (--ar 2:3)', '9:16': '9:16 portrait (--ar 9:16)', '1:1': '1:1 square (--ar 1:1)' };
     compDesc = compMap[composition] || '16:9 landscape (--ar 16:9)';
   }
 
@@ -300,9 +597,21 @@ export function buildOptimizeMessages(userPrompt, params) {
 
   const fgElems = allElems.filter(e => e.layer === 'foreground');
   const bgElems = allElems.filter(e => e.layer === 'background');
+  const textElems = allElems
+    .filter((e) => isTextPassthroughElement(e))
+    .sort((a, b) => {
+      const zDelta = (a.zIndex ?? 0) - (b.zIndex ?? 0);
+      if (zDelta !== 0) return zDelta;
+      const yDelta = (a.y ?? 50) - (b.y ?? 50);
+      if (Math.abs(yDelta) > 4) return yDelta;
+      return (a.x ?? 50) - (b.x ?? 50);
+    });
+  const textElementIds = new Set(textElems.map((e) => e.id));
+  const negativeEntries = collectNegativePrompts(allElems, canvasNegativePrompt);
 
   if (fgElems.length > 0) {
     fgDesc = fgElems
+      .filter((e) => !textElementIds.has(e.id))
       .sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
       .map(e => {
         let line = `- ${e.name}: ${posToSpatial(e.x, e.y)}, ${sizeToScale(e.w, e.h)}`;
@@ -311,10 +620,12 @@ export function buildOptimizeMessages(userPrompt, params) {
         if (e.focusPoint) line += `, [focus: ${e.focusPoint}]`;
         return line;
       }).join('\n');
+    if (!fgDesc) fgDesc = 'none';
   }
 
   if (bgElems.length > 0) {
     bgDesc = bgElems
+      .filter((e) => !textElementIds.has(e.id))
       .sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
       .map(e => {
         let line = `- ${e.name}: ${posToSpatial(e.x, e.y)}, ${sizeToScale(e.w, e.h)}`;
@@ -323,7 +634,21 @@ export function buildOptimizeMessages(userPrompt, params) {
         if (e.focusPoint) line += `, [focus: ${e.focusPoint}]`;
         return line;
       }).join('\n');
+    if (!bgDesc) bgDesc = 'none';
   }
+
+  let exactTextDesc = 'none';
+  if (textElems.length > 0) {
+    exactTextDesc = textElems.map((e) => {
+      const text = quoteExactText(e.textPassthrough.text);
+      const hint = e.textPassthrough.typographyHint?.trim()
+        ? `, ${e.textPassthrough.typographyHint.trim()}`
+        : ', readable typography';
+      return `- Text block ${text}: place at ${posToSpatial(e.x, e.y)}, ${sizeToScale(e.w, e.h)} size${hint}. Do not translate, rewrite, correct, or change punctuation.`;
+    }).join('\n');
+  }
+
+  const negativeDesc = formatNegativePromptEntries(negativeEntries);
 
   // Links (with optional description)
   let linkDesc = 'none';
@@ -380,7 +705,17 @@ export function buildOptimizeMessages(userPrompt, params) {
     sceneDesc = parts.length > 0 ? parts.join('\n') : 'default';
   }
 
-  const userMessage = `Original prompt:
+  const contractHint = `Output contract:
+- Return JSON only.
+- schemaVersion: ${OPTIMIZE_SCHEMA_VERSION}
+- orderedFields: ${JSON.stringify(OPTIMIZE_ORDERED_FIELDS)}
+- blocks order: ${OPTIMIZE_BLOCK_ORDER.join(' -> ')}
+- finalPrompt must be one complete text prompt and must contain exactly one --ar matching the Composition line.
+- If Negative constraints are not "none", finalPrompt must include one Avoid: segment before render/platform constraints.`;
+
+  const userMessage = `${contractHint}
+
+Original prompt:
 ${userPrompt}
 
 Target style: ${styleLabel}
@@ -392,6 +727,13 @@ ${fgDesc}
 
 Background elements (front to back):
 ${bgDesc}
+
+Exact text blocks, preserve verbatim:
+${exactTextDesc}
+
+Negative constraints, preserve as exclusions only:
+${negativeDesc}
+Priority rule: negative constraints override the style slider and all positive sections. If an exclusion conflicts with anime/realism terms, omit the conflicting style terms from blocks and finalPrompt.
 
 Element relationships / depth links:
 ${linkDesc}
@@ -411,49 +753,192 @@ ${sceneDesc}`;
 }
 
 /**
- * Parse the AI analysis response (v2)
- * Now expects a JSON object with { dimensions, characters, presets }
- * Falls back to v1 array format for backward compatibility
- * @param {string} text — raw AI response
- * @returns {{ dimensions: Array, elements: Array|null, characters: Array, presets: Array, sceneRecommendation: Object|null, compositionRecommendation: Object|null } | null}
+ * Parse full analysis response (strict mode).
+ * Requires:
+ * - top-level object
+ * - schemaVersion == ANALYSIS_SCHEMA_VERSION
+ * - orderedFields exactly equals ANALYSIS_ORDERED_FIELDS
+ * - dimensions count exactly 8
  */
 export function parseAnalysisResponse(text) {
-  if (!text || typeof text !== 'string') return null;
+  const parsed = tryParseJsonWithExtractors(text, { allowLooseObject: false, allowLooseArray: false });
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (!isStrictAnalysisEnvelope(parsed)) return null;
 
-  const parsed = tryParseJsonWithExtractors(text);
+  const dimensions = normalizeDimensions(parsed.dimensions, { exactCount: 8 });
+  if (!dimensions) return null;
 
+  const elements = normalizeElements(parsed.elements || []);
+  const characters = normalizeCharacters(parsed.characters || []);
+  const presets = normalizePresets(parsed.presets || [], dimensions);
+  const sceneRecommendation = normalizeSceneRecommendation(parsed.sceneRecommendation);
+  const compositionRecommendation = normalizeCompositionRecommendation(parsed.compositionRecommendation);
+
+  return {
+    dimensions,
+    elements,
+    characters,
+    presets,
+    sceneRecommendation,
+    compositionRecommendation,
+    schemaVersion: parsed.schemaVersion,
+    orderedFields: parsed.orderedFields,
+    __contract: makeContractMeta({
+      step: 'analysis',
+      schemaVersion: ANALYSIS_SCHEMA_VERSION,
+      contractValid: true,
+      finalSource: 'first-pass',
+    }),
+  };
+}
+
+/**
+ * Parse dimensions-only refresh response.
+ * Accepts:
+ * - { dimensions: [...] } or direct dimensions array
+ */
+export function parseDimensionsRefreshResponse(text) {
+  const parsed = tryParseJsonWithExtractors(text, { allowLooseObject: false, allowLooseArray: false });
   if (!parsed) return null;
 
-  // v1 backward compatibility: if result is an array, treat as dimensions only
   if (Array.isArray(parsed)) {
-    const dims = normalizeDimensions(parsed);
-    return dims ? {
-      dimensions: dims,
-      elements: null,
-      characters: [],
-      presets: [],
-      sceneRecommendation: null,
-      compositionRecommendation: null,
-    } : null;
+    const dimensions = normalizeDimensions(parsed, { exactCount: 8 });
+    return dimensions
+      ? {
+          dimensions,
+          __contract: makeContractMeta({
+            step: 'dimensions_refresh',
+            schemaVersion: DIMENSIONS_REFRESH_SCHEMA_VERSION,
+            contractValid: false,
+            contractErrors: ['schema_error:legacy_array_response'],
+            fallbackUsed: true,
+            finalSource: 'fallback',
+          }),
+        }
+      : null;
   }
 
-  // v2/v3 object format
-  if (typeof parsed === 'object') {
-    const dimensions = normalizeDimensions(parsed.dimensions);
-    if (!dimensions) return null;
+  const strictErrors = validateContractEnvelope(parsed, AI_CONTRACTS.dimensionsRefresh);
+  if (strictErrors.length === 0) {
+    const dimensions = normalizeDimensions(parsed.dimensions, { exactCount: 8 });
+    return dimensions
+      ? {
+          dimensions,
+          __contract: makeContractMeta({
+            step: 'dimensions_refresh',
+            schemaVersion: DIMENSIONS_REFRESH_SCHEMA_VERSION,
+            contractValid: true,
+            finalSource: 'first-pass',
+          }),
+        }
+      : null;
+  }
 
-    // v3: elements array (characters + objects)
-    // v2 fallback: characters array
-    const elements = parsed.elements || null;
-    const characters = normalizeCharacters(parsed.characters || []);
+  const dimensions = normalizeDimensions(parsed.dimensions, { exactCount: 8 });
+  return dimensions
+    ? {
+        dimensions,
+        __contract: makeContractMeta({
+          step: 'dimensions_refresh',
+          schemaVersion: DIMENSIONS_REFRESH_SCHEMA_VERSION,
+          contractValid: false,
+          contractErrors: strictErrors,
+          fallbackUsed: true,
+          finalSource: 'fallback',
+        }),
+      }
+    : null;
+}
+
+/**
+ * Parse presets-only refresh response.
+ * Accepts:
+ * - { presets: [...] } or direct presets array
+ */
+export function parsePresetRefreshResponse(text, dimensions) {
+  const parsed = tryParseJsonWithExtractors(text, { allowLooseObject: false, allowLooseArray: false });
+  if (!parsed) return null;
+  if (!Array.isArray(dimensions) || dimensions.length !== 8) return null;
+
+  if (Array.isArray(parsed)) {
+    const presets = normalizePresets(parsed || [], dimensions);
+    return presets.length > 0
+      ? {
+          presets,
+          __contract: makeContractMeta({
+            step: 'presets_refresh',
+            schemaVersion: PRESETS_REFRESH_SCHEMA_VERSION,
+            contractValid: false,
+            contractErrors: ['schema_error:legacy_array_response'],
+            fallbackUsed: true,
+            finalSource: 'fallback',
+          }),
+        }
+      : null;
+  }
+
+  const strictErrors = validateContractEnvelope(parsed, AI_CONTRACTS.presetsRefresh);
+  if (strictErrors.length === 0) {
     const presets = normalizePresets(parsed.presets || [], dimensions);
-    const sceneRecommendation = normalizeSceneRecommendation(parsed.sceneRecommendation);
-    const compositionRecommendation = normalizeCompositionRecommendation(parsed.compositionRecommendation);
-
-    return { dimensions, elements, characters, presets, sceneRecommendation, compositionRecommendation };
+    return presets.length > 0
+      ? {
+          presets,
+          __contract: makeContractMeta({
+            step: 'presets_refresh',
+            schemaVersion: PRESETS_REFRESH_SCHEMA_VERSION,
+            contractValid: true,
+            finalSource: 'first-pass',
+          }),
+        }
+      : null;
   }
 
-  return null;
+  const presets = normalizePresets(parsed.presets || [], dimensions);
+  return presets.length > 0
+    ? {
+        presets,
+        __contract: makeContractMeta({
+          step: 'presets_refresh',
+          schemaVersion: PRESETS_REFRESH_SCHEMA_VERSION,
+          contractValid: false,
+          contractErrors: strictErrors,
+          fallbackUsed: true,
+          finalSource: 'fallback',
+        }),
+      }
+    : null;
+}
+
+/**
+ * Parse single replacement dimension response.
+ * Accepts:
+ * - { dimension: {...} } or direct dimension object
+ */
+export function parseDimensionReplacementResponse(text) {
+  const parsed = tryParseJsonWithExtractors(text, { allowLooseObject: false, allowLooseArray: false });
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  let contractMeta = makeContractMeta({
+    step: 'dimension_replace',
+    schemaVersion: DIMENSION_REPLACE_SCHEMA_VERSION,
+    contractValid: false,
+    contractErrors: ['schema_error:legacy_response'],
+    fallbackUsed: true,
+    finalSource: 'fallback',
+  });
+
+  if (validateContractEnvelope(parsed, AI_CONTRACTS.dimensionReplace).length === 0) {
+    contractMeta = makeContractMeta({
+      step: 'dimension_replace',
+      schemaVersion: DIMENSION_REPLACE_SCHEMA_VERSION,
+      contractValid: true,
+      finalSource: 'first-pass',
+    });
+  }
+
+  const candidate = parsed.dimension && typeof parsed.dimension === 'object' ? parsed.dimension : parsed;
+  const dims = normalizeDimensions([candidate], { exactCount: 1 });
+  if (!dims || dims.length !== 1) return null;
+  return { dimension: dims[0], __contract: contractMeta };
 }
 
 /**
@@ -477,62 +962,163 @@ export function parseLightingRecommendationEnvelope(text) {
       recommendation: null,
       raw: null,
       parseError: 'empty_text',
+      contractMeta: makeContractMeta({
+        step: 'lighting',
+        schemaVersion: LIGHTING_SCHEMA_VERSION,
+        contractValid: false,
+        contractErrors: ['schema_error:empty_text'],
+        finalSource: 'first-pass',
+      }),
     };
   }
-  const parsed = tryParseJsonWithExtractors(text);
+  const parsed = tryParseJsonWithExtractors(text, { allowLooseObject: true, allowLooseArray: false });
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return {
       recommendation: null,
       raw: null,
       parseError: 'invalid_json_object',
+      contractMeta: makeContractMeta({
+        step: 'lighting',
+        schemaVersion: LIGHTING_SCHEMA_VERSION,
+        contractValid: false,
+        contractErrors: ['schema_error:invalid_json_object'],
+        finalSource: 'first-pass',
+      }),
     };
   }
-  const recommendation = normalizeLightingRecommendation(parsed);
+  const strictErrors = validateContractEnvelope(parsed, AI_CONTRACTS.lighting);
+  const sourceLightsPayload = strictErrors.length === 0
+    ? { lights: parsed.lights, reason: parsed.reason }
+    : parsed;
+
+  const recommendation = normalizeLightingRecommendation(sourceLightsPayload);
   return {
     recommendation,
     raw: parsed,
     parseError: recommendation ? null : 'normalize_failed',
+    contractMeta: makeContractMeta({
+      step: 'lighting',
+      schemaVersion: LIGHTING_SCHEMA_VERSION,
+      contractValid: strictErrors.length === 0,
+      contractErrors: strictErrors,
+      fallbackUsed: strictErrors.length > 0,
+      finalSource: strictErrors.length === 0 ? 'first-pass' : 'fallback',
+    }),
   };
 }
 
-function tryParseJsonWithExtractors(text) {
-  if (typeof text !== 'string') return null;
-  const cleaned = text.trim();
-  if (!cleaned) return null;
-
-  const extractors = [
-    (t) => JSON.parse(t),
-    (t) => {
-      const m = t.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-      return m ? JSON.parse(m[1].trim()) : null;
-    },
-    (t) => {
-      const fi = t.indexOf('{');
-      const li = t.lastIndexOf('}');
-      return (fi !== -1 && li > fi) ? JSON.parse(t.substring(fi, li + 1)) : null;
-    },
-    (t) => {
-      const fi = t.indexOf('[');
-      const li = t.lastIndexOf(']');
-      return (fi !== -1 && li > fi) ? JSON.parse(t.substring(fi, li + 1)) : null;
-    },
-  ];
-
-  for (const extractor of extractors) {
-    try {
-      const result = extractor(cleaned);
-      if (result) return result;
-    } catch {
-      // ignore and continue
+/**
+ * Parse optimization response contract.
+ * Supports strict cc.optimize.v1 and legacy plain-text fallback.
+ * @param {string} text
+ * @param {Object} context
+ * @param {Object} context.composition
+ * @param {Object} context.scene
+ * @param {Array<string>} context.exactTexts
+ * @returns {{ finalPrompt: string, blocks: Object, checks: Object, contractMeta: Object } | null}
+ */
+export function parseOptimizeResponse(text, context = {}) {
+  const parsed = tryParseJsonWithExtractors(text, { allowLooseObject: true, allowLooseArray: false });
+  const negativePrompts = Array.isArray(context.negativePrompts) ? context.negativePrompts : [];
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const strictErrors = validateContractEnvelope(parsed, AI_CONTRACTS.optimize);
+    if (strictErrors.length === 0) {
+      const blocks = normalizeOptimizeBlocks(parsed.blocks);
+      const finalPrompt = normalizeFinalPrompt(parsed.finalPrompt);
+      if (blocks && finalPrompt) {
+        const semanticConflicts = auditPromptSemantics({
+          prompt: finalPrompt,
+          composition: context.composition || null,
+          scene: context.scene || null,
+          exactTexts: Array.isArray(context.exactTexts) ? context.exactTexts : [],
+          negativePrompts,
+        });
+        return {
+          finalPrompt,
+          blocks,
+          checks: normalizeOptimizeChecks(parsed.checks),
+          contractMeta: makeContractMeta({
+            step: 'optimize',
+            schemaVersion: OPTIMIZE_SCHEMA_VERSION,
+            contractValid: true,
+            semanticConflicts,
+            finalSource: 'first-pass',
+          }),
+        };
+      }
+      return {
+        finalPrompt: '',
+        blocks: null,
+        checks: {},
+        contractMeta: makeContractMeta({
+          step: 'optimize',
+          schemaVersion: OPTIMIZE_SCHEMA_VERSION,
+          contractValid: false,
+          contractErrors: ['schema_error:missing_blocks_or_finalPrompt'],
+          finalSource: 'first-pass',
+        }),
+      };
+    }
+    const looseFinalPrompt = normalizeFinalPrompt(parsed.finalPrompt);
+    if (looseFinalPrompt) {
+      const semanticConflicts = auditPromptSemantics({
+        prompt: looseFinalPrompt,
+        composition: context.composition || null,
+        scene: context.scene || null,
+        exactTexts: Array.isArray(context.exactTexts) ? context.exactTexts : [],
+        negativePrompts,
+      });
+      return {
+        finalPrompt: looseFinalPrompt,
+        blocks: normalizeOptimizeBlocks(parsed.blocks),
+        checks: normalizeOptimizeChecks(parsed.checks),
+        contractMeta: makeContractMeta({
+          step: 'optimize',
+          schemaVersion: OPTIMIZE_SCHEMA_VERSION,
+          contractValid: false,
+          contractErrors: strictErrors,
+          semanticConflicts,
+          fallbackUsed: true,
+          finalSource: 'fallback',
+        }),
+      };
     }
   }
-  return null;
+
+  const fallbackPrompt = normalizeFinalPrompt(text);
+  if (!fallbackPrompt) return null;
+  const semanticConflicts = auditPromptSemantics({
+    prompt: fallbackPrompt,
+    composition: context.composition || null,
+    scene: context.scene || null,
+    exactTexts: Array.isArray(context.exactTexts) ? context.exactTexts : [],
+    negativePrompts,
+  });
+  return {
+    finalPrompt: fallbackPrompt,
+    blocks: null,
+    checks: {},
+    contractMeta: makeContractMeta({
+      step: 'optimize',
+      schemaVersion: OPTIMIZE_SCHEMA_VERSION,
+      contractValid: false,
+      contractErrors: ['schema_error:legacy_plain_text'],
+      semanticConflicts,
+      fallbackUsed: true,
+      finalSource: 'fallback',
+    }),
+  };
+}
+
+function isStrictAnalysisEnvelope(parsed) {
+  return validateContractEnvelope(parsed, AI_CONTRACTS.analysis).length === 0;
 }
 
 /* ---- Normalization Helpers ---- */
 
-function normalizeDimensions(arr) {
+function normalizeDimensions(arr, { exactCount = null } = {}) {
   if (!Array.isArray(arr) || arr.length === 0) return null;
+  if (Number.isInteger(exactCount) && arr.length !== exactCount) return null;
 
   const normalized = arr
     .filter(item => item && typeof item.name === 'string')
@@ -548,7 +1134,45 @@ function normalizeDimensions(arr) {
         : ['低', '高'],
     }));
 
+  if (Number.isInteger(exactCount) && normalized.length !== exactCount) return null;
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeElements(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((item) => item && typeof item.name === 'string')
+    .map((item, i) => ({
+      id: item.id || `elem_${i + 1}`,
+      type: item.type === 'object' ? 'object' : 'character',
+      layer: item.layer === 'background' ? 'background' : 'foreground',
+      name: item.name,
+      description: item.description || '',
+      prompt: item.prompt || '',
+      role: item.role || '',
+      position: {
+        x: clamp(item.position?.x ?? item.x ?? 50, 0, 100),
+        y: clamp(item.position?.y ?? item.y ?? 50, 0, 100),
+      },
+      size: {
+        w: clamp(item.size?.w ?? item.w ?? 18, 5, 60),
+        h: clamp(item.size?.h ?? item.h ?? 28, 5, 60),
+      },
+      focusPoint: item.focusPoint || '',
+      textPassthrough: normalizeTextPassthrough(item.textPassthrough),
+      negativePrompt: normalizeNegativePrompt(item.negativePrompt),
+    }));
+}
+
+function normalizeTextPassthrough(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const text = String(source.text || '');
+  const typographyHint = String(source.typographyHint || '');
+  return {
+    enabled: Boolean(source.enabled && text.trim()),
+    text,
+    typographyHint,
+  };
 }
 
 function normalizeCharacters(arr) {
@@ -586,6 +1210,33 @@ function normalizePresets(arr, dimensions) {
         return acc;
       }, {}),
     }));
+}
+
+function normalizeOptimizeBlocks(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const normalized = {};
+  for (const key of OPTIMIZE_BLOCK_ORDER) {
+    const value = raw[key];
+    if (typeof value !== 'string') return null;
+    normalized[key] = value.trim();
+  }
+  return normalized;
+}
+
+function normalizeOptimizeChecks(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const next = {};
+  if (typeof raw.ratio === 'string') next.ratio = raw.ratio.trim();
+  if (typeof raw.orientation === 'string') next.orientation = raw.orientation.trim();
+  if (typeof raw.finalSize === 'string') next.finalSize = raw.finalSize.trim();
+  if (typeof raw.containsSingleAr === 'boolean') next.containsSingleAr = raw.containsSingleAr;
+  if (typeof raw.exactTextProtected === 'boolean') next.exactTextProtected = raw.exactTextProtected;
+  if (typeof raw.negativeConstraintsPreserved === 'boolean') next.negativeConstraintsPreserved = raw.negativeConstraintsPreserved;
+  return next;
+}
+
+function normalizeFinalPrompt(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function clamp(val, min, max) {
@@ -629,4 +1280,64 @@ function sizeToScale(w, h) {
   if (area > 400) return 'prominent';
   if (area > 150) return 'medium';
   return 'small';
+}
+
+function isTextPassthroughElement(elem) {
+  const tp = elem?.textPassthrough;
+  if (!tp || typeof tp !== 'object') return false;
+  if (!tp.enabled) return false;
+  return String(tp.text || '').trim().length > 0;
+}
+
+function quoteExactText(text) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) return '""';
+  return `"${normalized.replace(/"/g, '\\"')}"`;
+}
+
+function collectNegativePrompts(elements = [], canvasNegativePrompt = null) {
+  const entries = [];
+  const globalNegative = normalizeNegativePrompt(canvasNegativePrompt);
+  if (globalNegative.enabled) {
+    entries.push({
+      scope: 'global',
+      text: globalNegative.text,
+      label: 'Global canvas',
+    });
+  }
+
+  for (const elem of Array.isArray(elements) ? elements : []) {
+    const negative = normalizeNegativePrompt(elem?.negativePrompt);
+    if (!negative.enabled) continue;
+    entries.push({
+      scope: 'object',
+      elementId: elem.id || '',
+      elementName: elem.name || 'object',
+      elementLayer: elem.layer || 'foreground',
+      text: negative.text,
+      label: `${elem.name || 'object'} at ${posToSpatial(elem.x ?? elem.position?.x ?? 50, elem.y ?? elem.position?.y ?? 50)}`,
+    });
+  }
+  return entries;
+}
+
+function formatNegativePromptEntries(entries) {
+  if (!entries.length) return 'none';
+  return entries.map((entry) => {
+    const quoted = quoteExactText(entry.text);
+    if (entry.scope === 'global') {
+      return `- Global: Avoid ${quoted}. Applies to the entire image. Keep this only as a negative constraint; do not turn it into a positive visual description.`;
+    }
+    const layerLabel = entry.elementLayer === 'background' ? 'background object' : 'foreground object';
+    return `- Object "${entry.elementName}" (${layerLabel}, ${entry.label}): Avoid ${quoted}. Applies only to this object; do not apply it to unrelated objects or the background.`;
+  }).join('\n');
+}
+
+function normalizeNegativePrompt(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const text = String(source.text || '');
+  return {
+    enabled: Boolean(source.enabled && text.trim()),
+    text,
+  };
 }

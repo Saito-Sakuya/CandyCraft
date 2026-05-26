@@ -1,3 +1,11 @@
 .dev.vars
 .wrangler/
 node_modules/
+解决方案.md
+audit/clarity/prompt-clarity-report.md
+audit/clarity/prompt-clarity-results.json
+audit/smoke/browser-smoke-report.md
+audit/smoke/browser-visual-smoke-report.md
+audit/smoke/.api-*.log
+audit/smoke/.visual-server.pid
+audit/smoke/scene-preview-current.png

@@ -52,6 +52,7 @@ function applyTheme(theme) {
   } else {
     document.documentElement.removeAttribute('data-theme');
   }
+  window.dispatchEvent(new CustomEvent('cc:theme-change', { detail: { theme } }));
 }
 
 function updateToggleBtn(btn, theme) {

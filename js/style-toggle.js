@@ -82,7 +82,33 @@ function render() {
 }
 
 function updateTrackFill(input, value) {
+  if (!input) return;
   const pct = ((value - MIN) / (MAX - MIN)) * 100;
-  // Anime side = pink, realistic side = sky blue
-  input.style.background = `linear-gradient(to right, #FF8FAB 0%, #C3A6FF ${pct}%, #F0E6F0 ${pct}%)`;
+  const { start, fill, empty } = getTrackColors();
+  input.style.background = `linear-gradient(to right, ${start} 0%, ${fill} ${pct}%, ${empty} ${pct}%)`;
+}
+
+/**
+ * Refresh inline range background after Candy/Pro mode changes.
+ */
+export function refreshStyleToggleTheme() {
+  const input = containerEl?.querySelector('.style-slider-input');
+  updateTrackFill(input, currentLevel);
+}
+
+function getTrackColors() {
+  const isPro = document.documentElement.dataset.uiMode === 'pro';
+  if (isPro) {
+    return {
+      start: 'var(--color-text-secondary)',
+      fill: 'var(--color-text-primary)',
+      empty: 'var(--color-border)',
+    };
+  }
+
+  return {
+    start: 'var(--color-candy-pink)',
+    fill: 'var(--color-candy-lavender)',
+    empty: 'var(--color-border)',
+  };
 }

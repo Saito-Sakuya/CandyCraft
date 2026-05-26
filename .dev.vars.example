@@ -1,3 +1,15 @@
 UPSTREAM_BASE_URL=https://api.openai.com/v1
 UPSTREAM_API_KEY=sk-your-api-key
 DEFAULT_MODEL=gpt-4o
+
+# Optional managed orchestration role overrides.
+# Leave unset to use UPSTREAM_BASE_URL / UPSTREAM_API_KEY / DEFAULT_MODEL.
+# STRUCTURE_BASE_URL=https://api.openai.com/v1
+# STRUCTURE_API_KEY=sk-your-structure-key
+# STRUCTURE_MODEL=gpt-4o
+# LIGHTING_BASE_URL=https://api.openai.com/v1
+# LIGHTING_API_KEY=sk-your-lighting-key
+# LIGHTING_MODEL=gpt-4o-mini
+# NORMALIZE_BASE_URL=https://api.openai.com/v1
+# NORMALIZE_API_KEY=sk-your-normalize-key
+# NORMALIZE_MODEL=gpt-4o
