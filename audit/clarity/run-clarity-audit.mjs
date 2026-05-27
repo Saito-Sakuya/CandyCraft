@@ -81,6 +81,20 @@ const SAMPLES = [
     { id: 'txt_1', type: 'object', layer: 'foreground', name: '标题', x: 50, y: 18, w: 42, h: 10, zIndex: 2, textPassthrough: { enabled: true, text: '今日限定', typographyHint: 'bold readable poster title' } },
     { id: 'bg_1', type: 'object', layer: 'background', name: '环境', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: '场景背景' },
   ], canvasNegativePrompt: { enabled: true, text: 'crowd in the background' }, expect: { negativeTexts: ['crowd in the background'], exactTexts: ['今日限定'] } },
+  { id: 'S27', group: 'snapshot', prompt: '手机自拍抓拍，三位朋友挤进画面，午后阳光，轻微过曝，构图有点歪', elements: [
+    { id: 'fg_1', type: 'character', layer: 'foreground', name: '朋友A', x: 32, y: 56, w: 20, h: 30, zIndex: 3, description: 'leans close to the phone camera' },
+    { id: 'fg_2', type: 'character', layer: 'foreground', name: '朋友B', x: 52, y: 54, w: 20, h: 30, zIndex: 2, description: 'center subject smiling naturally' },
+    { id: 'fg_3', type: 'character', layer: 'foreground', name: '朋友C', x: 70, y: 58, w: 18, h: 28, zIndex: 1, description: 'peeks in from the edge' },
+    { id: 'bg_1', type: 'object', layer: 'background', name: '街角背景', x: 50, y: 40, w: 64, h: 38, zIndex: 0, description: 'casual street corner' },
+  ], expect: { snapshotIntent: true, multiCharacterBalance: true } },
+  { id: 'S28', group: 'lighting_consistency', prompt: '正午烈日下的天台人像，强烈阳光但希望阴影不要死黑，保持自然反光', expect: { hardLightIntent: true } },
+  { id: 'S29', group: 'multi_balance', prompt: '灵梦、幽幽子和妖梦一起自拍，妖梦从身后探入画面做鬼脸，轻松抓拍感', elements: [
+    { id: 'fg_1', type: 'character', layer: 'foreground', name: '灵梦', x: 36, y: 56, w: 20, h: 30, zIndex: 3, description: 'front-left, holding the phone' },
+    { id: 'fg_2', type: 'character', layer: 'foreground', name: '幽幽子', x: 56, y: 56, w: 20, h: 30, zIndex: 2, description: 'front-right, smiling toward camera' },
+    { id: 'fg_3', type: 'character', layer: 'foreground', name: '妖梦', x: 70, y: 42, w: 18, h: 24, zIndex: 1, description: 'leans into frame from behind, making a goofy expression' },
+    { id: 'bg_1', type: 'object', layer: 'background', name: '神社参道', x: 50, y: 42, w: 62, h: 40, zIndex: 0, description: 'sunlit shrine path' },
+  ], expect: { snapshotIntent: true, multiCharacterBalance: true } },
+  { id: 'S30', group: 'style_arbitration', prompt: '手机随手拍质感，但又要二次元线稿、柔和赛璐珞、照片级写实、电影级体积光，人物在街口回头', expect: { styleArbitration: true, snapshotIntent: true } },
 ];
 
 const DEFAULT_DIMENSIONS = [
@@ -441,6 +455,48 @@ function collectIssues({
       code: 'missing_camera_lighting',
       message: '优化输入缺少 Camera & lighting 段落。',
       suggestion: '保留并强化相机与布光结构化段落。',
+    });
+  }
+
+  if (!optimizeInput.includes('Prompt arbitration:')) {
+    issues.push({
+      severity: 'high',
+      code: 'missing_prompt_arbitration',
+      message: '优化输入缺少 Prompt arbitration 仲裁段。',
+      suggestion: '优化阶段必须显式传入主导方向、信息密度和冲突压缩规则。',
+    });
+  }
+
+  if (sample.expect?.snapshotIntent && !/Snapshot intent detected/i.test(optimizeInput)) {
+    issues.push({
+      severity: 'medium',
+      code: 'snapshot_arbitration_missing',
+      message: '自拍/手机快照样本未触发快照真实感仲裁提示。',
+      suggestion: '检测 selfie/phone/手机/自拍/抓拍时，应强化手机快照真实感并削弱专业棚拍词。',
+    });
+  }
+  if (sample.expect?.hardLightIntent && !/Hard-light intent detected/i.test(optimizeInput)) {
+    issues.push({
+      severity: 'medium',
+      code: 'hard_light_arbitration_missing',
+      message: '硬光/正午样本未触发光影一致性仲裁提示。',
+      suggestion: '检测 harsh/noon/正午/硬光时，应避免 harsh + diffused shadows 的物理冲突。',
+    });
+  }
+  if (sample.expect?.multiCharacterBalance && !/Multi-character balance/i.test(optimizeInput)) {
+    issues.push({
+      severity: 'medium',
+      code: 'multi_character_arbitration_missing',
+      message: '多角色样本未触发角色权重平衡提示。',
+      suggestion: '3 个及以上前景角色时，每个角色都要有位置、动作或关系提示。',
+    });
+  }
+  if (sample.expect?.styleArbitration && !/Primary visual direction/i.test(optimizeInput)) {
+    issues.push({
+      severity: 'medium',
+      code: 'style_arbitration_missing',
+      message: '风格过载样本未包含主导方向仲裁提示。',
+      suggestion: '优化阶段应明确单一主风格，并要求删除互相稀释的风格词。',
     });
   }
 

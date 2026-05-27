@@ -200,6 +200,10 @@ export function auditPromptSemantics({ prompt = '', composition = null, scene = 
       message: 'Prompt mixes strict photorealistic terms with strict anime/cel terms.',
     });
   }
+  conflicts.push(...auditStyleDensity(zones));
+  conflicts.push(...auditLightingConsistency(zones));
+  conflicts.push(...auditSnapshotRealism(zones));
+  conflicts.push(...auditMultiCharacterBalance(zones));
 
   for (const rawText of exactTexts || []) {
     const exact = String(rawText || '').trim();
@@ -213,6 +217,95 @@ export function auditPromptSemantics({ prompt = '', composition = null, scene = 
     }
   }
   conflicts.push(...auditNegativePromptSemantics(zones, negativePrompts));
+  return conflicts;
+}
+
+function auditStyleDensity(zones) {
+  const conflicts = [];
+  const lower = zones.positive.toLowerCase();
+  const families = [
+    { key: 'snapshot', re: /\b(selfie|phone snapshot|smartphone|candid snapshot|casual photo)\b/ },
+    { key: 'anime', re: /\b(anime|manga|cel shading|lineart|anime screencap)\b/ },
+    { key: 'photo', re: /\b(photorealistic|hyperrealistic|raw photo|dslr|photo-accurate|documentary photo)\b/ },
+    { key: 'cinematic', re: /\b(cinematic|studio lighting|volumetric lighting|film look|film grain)\b/ },
+    { key: 'cg', re: /\b(cg render|ray tracing|octane render|physically based rendering|global illumination)\b/ },
+    { key: 'illustration', re: /\b(stylized illustration|digital painting|painterly|concept art)\b/ },
+  ].filter((family) => family.re.test(lower)).map((family) => family.key);
+
+  if (families.length >= 4) {
+    conflicts.push({
+      code: 'style_density_overload',
+      severity: 'medium',
+      message: `Prompt activates too many visual style families (${families.join(', ')}).`,
+    });
+  }
+  if (families.includes('snapshot') && /\b(masterpiece|studio lighting|cinematic masterpiece|epic cinematic)\b/.test(lower)) {
+    conflicts.push({
+      code: 'snapshot_overpolished',
+      severity: 'medium',
+      message: 'Phone snapshot/candid intent is diluted by polished studio or masterpiece wording.',
+    });
+  }
+  return conflicts;
+}
+
+function auditLightingConsistency(zones) {
+  const conflicts = [];
+  const lower = zones.positive.toLowerCase();
+  const harshLight = /\b(harsh|hard|crisp|midday|noon|direct sunlight|strong sunlight)\b/.test(lower);
+  const diffusedShadow = /\b(diffused shadows|soft diffused shadows|fully diffused shadows|soft shadows)\b/.test(lower);
+  const acceptableSoftening = /\b(slightly softened shadows|gentle bounce lighting|softened by bounce|bounce light)\b/.test(lower);
+  if (harshLight && diffusedShadow && !acceptableSoftening) {
+    conflicts.push({
+      code: 'harsh_diffused_lighting_conflict',
+      severity: 'medium',
+      message: 'Prompt mixes harsh/direct light with diffused/soft shadows without a bounce-light explanation.',
+    });
+  }
+  return conflicts;
+}
+
+function auditSnapshotRealism(zones) {
+  const conflicts = [];
+  const lower = zones.positive.toLowerCase();
+  if (!/\b(selfie|phone snapshot|smartphone|candid snapshot|casual photo)\b/.test(lower)) return conflicts;
+  const realismHints = [
+    /\boff-?center\b/,
+    /\btilted framing\b/,
+    /\bsmartphone hdr\b/,
+    /\bslight overexposure\b/,
+    /\bimperfect\b/,
+    /\bcandid timing\b/,
+    /\bnatural facial asymmetry\b/,
+  ];
+  const hintCount = realismHints.filter((re) => re.test(lower)).length;
+  if (hintCount < 2) {
+    conflicts.push({
+      code: 'snapshot_realism_under_specified',
+      severity: 'low',
+      message: 'Phone snapshot/candid prompt lacks enough imperfect smartphone realism cues.',
+    });
+  }
+  return conflicts;
+}
+
+function auditMultiCharacterBalance(zones) {
+  const conflicts = [];
+  const text = zones.positive;
+  const lower = text.toLowerCase();
+  const multiMarker = /\b(three|3)\s+(characters|people|girls|boys|subjects)\b|三人|三位|三个/.test(lower);
+  if (!multiMarker) return conflicts;
+  const relationHints = [
+    /\b(all three|each|together|beside|behind|leans|peeks|stands|sits|foreground|middle ground|background)\b/,
+    /前景|中景|后景|旁边|身后|探入|站在|坐在|互动|关系/,
+  ];
+  if (!relationHints.some((re) => re.test(text))) {
+    conflicts.push({
+      code: 'multi_character_balance_missing',
+      severity: 'low',
+      message: 'Three-character scene lacks explicit placement or action balance for all subjects.',
+    });
+  }
   return conflicts;
 }
 

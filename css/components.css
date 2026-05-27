@@ -53,6 +53,16 @@
   box-shadow: none;
 }
 
+.btn-optimize-primary {
+  background: linear-gradient(135deg, #FFB347 0%, #FF7A59 50%, #FF5C8A 100%);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(255, 122, 89, 0.34);
+}
+
+.btn-optimize-primary:hover {
+  box-shadow: 0 8px 30px rgba(255, 122, 89, 0.44);
+}
+
 .btn-secondary {
   display: inline-flex;
   align-items: center;
@@ -1465,6 +1475,10 @@
   margin-bottom: 0;
 }
 
+.poster-inspector-body {
+  padding-bottom: calc(var(--space-sm) + env(safe-area-inset-bottom, 0px));
+}
+
 .poster-group > summary {
   list-style: none;
   cursor: pointer;
@@ -1716,6 +1730,72 @@ body:not(.poster-workspace-active) .poster-floating-panel {
 }
 
 @media (max-width: 768px) {
+  .card {
+    padding: var(--space-md);
+    border-radius: var(--radius-lg);
+  }
+
+  .card-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .card-actions,
+  .result-header-actions,
+  .card-actions-compact,
+  .canvas-header-tools {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .prompt-textarea {
+    min-height: 128px;
+    margin-bottom: var(--space-sm);
+  }
+
+  .analysis-action-section {
+    padding: var(--space-sm);
+    border-radius: var(--radius-lg);
+  }
+
+  .analysis-action-list {
+    gap: 10px;
+    margin-top: var(--space-sm);
+  }
+
+  .analysis-action-copy {
+    font-size: 0.72rem;
+  }
+
+  .analysis-action-copy strong {
+    font-size: 0.8rem;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    min-height: 42px;
+  }
+
+  .btn-sm {
+    min-height: 36px;
+    padding-inline: 12px;
+  }
+
+  .template-form {
+    grid-template-columns: 1fr;
+  }
+
+  .template-item {
+    grid-template-columns: 1fr;
+  }
+
+  .template-item-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
   body.poster-workspace-active .poster-mobile-inspector-btn {
     display: inline-flex;
   }
@@ -1731,12 +1811,11 @@ body:not(.poster-workspace-active) .poster-floating-panel {
   }
 
   body.poster-workspace-active .poster-floating-panel {
-    inset: 0;
-    top: 0;
+    inset: var(--poster-header-offset, 56px) 0 0 0;
     left: 0;
     z-index: 940;
     width: auto;
-    height: 100dvh;
+    height: calc(100dvh - var(--poster-header-offset, 56px));
     min-width: 0;
     border-radius: 0;
     border: none;
@@ -1752,10 +1831,9 @@ body:not(.poster-workspace-active) .poster-floating-panel {
 
   body.poster-workspace-active .poster-inspector {
     position: fixed;
-    inset: 0;
-    top: 0;
+    inset: var(--poster-header-offset, 56px) 0 0 0;
     z-index: 920;
-    height: 100dvh;
+    height: calc(100dvh - var(--poster-header-offset, 56px));
     max-height: none;
     min-height: 0;
     border-radius: 0;
@@ -1783,11 +1861,32 @@ body:not(.poster-workspace-active) .poster-floating-panel {
   body.poster-workspace-active .poster-inspector-body {
     flex: 1 1 auto;
     min-height: 0;
-    padding-bottom: calc(var(--space-sm) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
   }
 
   body.poster-workspace-active .poster-group-layers {
     display: block;
+  }
+}
+
+@media (max-width: 640px) {
+  .composition-toolbar {
+    margin-top: var(--space-xs);
+    padding-bottom: var(--space-sm);
+  }
+
+  .poster-floating-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .poster-tool-btn {
+    min-height: 40px;
+  }
+
+  .result-content {
+    padding: var(--space-md);
+    font-size: 0.86rem;
+    line-height: 1.7;
   }
 }
 
@@ -1814,6 +1913,30 @@ body:not(.poster-workspace-active) .poster-floating-panel {
 [data-ui-mode="pro"] .btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
+}
+
+[data-ui-mode="pro"] .btn-optimize-primary {
+  background: #B8792F;
+  border-color: #B8792F;
+  color: #FFF9EC;
+  box-shadow: none;
+}
+
+[data-ui-mode="pro"] .btn-optimize-primary:hover {
+  background: #946126;
+  border-color: #946126;
+  box-shadow: var(--shadow-md);
+}
+
+[data-ui-mode="pro"][data-theme="dark"] .btn-optimize-primary {
+  background: #E0B15F;
+  border-color: #E0B15F;
+  color: #242424;
+}
+
+[data-ui-mode="pro"][data-theme="dark"] .btn-optimize-primary:hover {
+  background: #F1C879;
+  border-color: #F1C879;
 }
 
 [data-ui-mode="pro"] .btn-secondary,

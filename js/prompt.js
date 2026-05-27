@@ -128,16 +128,16 @@ const STYLE_DESCRIPTIONS = {
   ],
   optimize: [
     '',
-    /* 1  */ `\n\n风格要求：纯赛璐珞动漫（程度 1/10）。\n请使用以下术语（按需选用）：\n- cel shading, flat color, bold outlines, clean lineart\n- anime screencap, animation frame, limited palette\n- sakuga quality, key animation\n禁止使用任何写实类术语（photorealistic, DSLR 等）。`,
-    /* 2  */ `\n\n风格要求：动漫风格（程度 2/10）。\n请使用以下术语（按需选用）：\n- anime style, anime aesthetic, cel shading\n- clean lineart, vivid colors, expressive eyes\n- dynamic pose, anime key visual\n- soft shading, gradient hair\n不要使用写实类术语。`,
-    /* 3  */ `\n\n风格要求：动漫插画（程度 3/10）。\n请使用以下术语（按需选用）：\n- anime illustration, digital art, light novel illustration\n- soft cel shading, detailed lineart, pastel palette\n- expressive characters, anime aesthetic\n不要使用 photorealistic, DSLR, RAW photo 等术语。`,
-    /* 4  */ `\n\n风格要求：风格化插画（程度 4/10）。\n请使用以下术语（按需选用）：\n- stylized illustration, digital painting, concept art\n- detailed shading, dramatic lighting, painted aesthetic\n- character illustration, art station quality\n可以使用 cinematic lighting，但不要使用 photorealistic 或 DSLR。`,
-    /* 5  */ `\n\n风格要求：平衡混合风格（程度 5/10，插画与写实之间）。\n请使用以下术语（按需选用）：\n- digital painting, detailed illustration, semi-realistic\n- realistic proportions, cinematic lighting, rich details\n- painterly style, dramatic atmosphere, refined rendering\n不要使用 cel shading, flat color 等纯动漫术语，也不要使用 DSLR, RAW photo 等纯摄影术语。`,
-    /* 6  */ `\n\n风格要求：半写实（程度 6/10）。\n请使用以下术语（按需选用）：\n- semi-realistic, highly detailed, cinematic\n- realistic lighting, detailed textures, rendered\n- digital painting, artstation, dramatic atmosphere\n- subtle stylization, painterly details\n可以使用 cinematic, volumetric lighting，但避免 photorealistic, 8K, RAW photo。`,
-    /* 7  */ `\n\n风格要求：偏写实（程度 7/10）。\n请使用以下术语（按需选用）：\n- realistic, cinematic, highly detailed\n- volumetric lighting, ray tracing, CG render\n- detailed skin texture, realistic materials\n- shallow depth of field, color grading\n避免所有动漫术语（anime, cel shading, lineart）。`,
-    /* 8  */ `\n\n风格要求：写实 CG（程度 8/10）。\n请使用以下术语（按需选用）：\n- hyperrealistic, cinematic, CG render quality\n- subsurface scattering, physically based rendering\n- volumetric lighting, global illumination, ray tracing\n- film grain, color grading, shallow depth of field\n- detailed skin pores, realistic materials\n完全不要使用动漫相关术语。`,
-    /* 9  */ `\n\n风格要求：照片级写实（程度 9/10）。\n请使用以下术语（按需选用）：\n- photorealistic, DSLR quality, RAW photo\n- natural skin texture, subsurface scattering\n- volumetric lighting, bokeh, shallow depth of field\n- film grain, cinematic color palette\n- physically based rendering, octane render\n完全不要使用任何动漫或插画术语。`,
-    /* 10 */ `\n\n风格要求：极致照片写实（程度 10/10）。\n请使用以下术语（按需选用）：\n- photorealistic, hyperrealistic, 8K UHD, RAW photo\n- DSLR quality, natural lighting, photo-accurate\n- subsurface scattering, micro-detail skin texture\n- volumetric lighting, ray tracing, global illumination\n- shallow depth of field, bokeh, film grain\n- physically based rendering, octane render\n输出应与真实相机拍摄的照片无法区分。完全不要使用任何动漫、插画或绘画术语。`,
+    /* 1  */ `\n\n风格仲裁：主导方向为纯赛璐珞动漫（1/10）。最多选 1-2 个核心术语，如 cel shading / flat color / anime screencap。禁止 photorealistic、DSLR、RAW photo 等写实摄影术语。`,
+    /* 2  */ `\n\n风格仲裁：主导方向为动漫风格（2/10）。最多选 1-2 个核心术语，如 anime style / clean lineart / cel shading。不要加入写实摄影术语。`,
+    /* 3  */ `\n\n风格仲裁：主导方向为动漫插画（3/10）。最多选 1-2 个核心术语，如 anime illustration / soft cel shading / light novel illustration。不要加入 DSLR、RAW photo、photorealistic。`,
+    /* 4  */ `\n\n风格仲裁：主导方向为风格化插画（4/10）。最多选 1-2 个核心术语，如 stylized illustration / digital painting。可以有真实光影，但不要同时堆叠摄影写实词。`,
+    /* 5  */ `\n\n风格仲裁：主导方向为平衡混合（5/10）。最多选 1-2 个核心术语，如 semi-realistic illustration / painterly rendering。不要同时使用纯动漫与纯摄影写实词。`,
+    /* 6  */ `\n\n风格仲裁：主导方向为半写实（6/10）。最多选 1-2 个核心术语，如 semi-realistic / realistic lighting / painterly detail。避免 photorealistic、RAW photo、cel shading。`,
+    /* 7  */ `\n\n风格仲裁：主导方向为偏写实（7/10）。最多选 1-2 个核心术语，如 realistic CG / natural materials。避免 anime、cel shading、lineart 等动漫词。`,
+    /* 8  */ `\n\n风格仲裁：主导方向为写实 CG（8/10）。最多选 1-2 个核心术语，如 CG render / physically based rendering。不要加入动漫、插画、赛璐珞词。`,
+    /* 9  */ `\n\n风格仲裁：主导方向为照片级写实（9/10）。最多选 1-2 个核心术语，如 photorealistic / natural skin texture / RAW photo。不要加入动漫或绘画术语。`,
+    /* 10 */ `\n\n风格仲裁：主导方向为极致照片写实（10/10）。最多选 1-2 个核心术语，如 photorealistic / RAW photo / photo-accurate。输出应像真实相机拍摄，禁止动漫、插画或绘画术语。`,
   ],
 };
 
@@ -209,7 +209,12 @@ ${OPTIMIZE_BLOCK_ORDER.join(' -> ')}
 15. 如果存在 Negative constraints，必须只作为排除约束表达在 negativeConstraints block 和 finalPrompt 的 Avoid: 段中；不要把排除内容写进 subject/foreground/background 等正向描述
 16. 排除约束优先于动漫/写实风格滑杆；若冲突，必须移除被排除的风格术语
 17. 使用通用 Avoid: 自然语言，不要默认追加 Midjourney --no
-18. 禁止输出 JSON 以外的解释文本`;
+18. 主导方向仲裁：每次只能选择一个主导视觉方向（例如手机快照、动漫插画、电影写实、CG 渲染），其他方向只能作为弱辅助，不得并列堆叠
+19. 信息密度预算：finalPrompt 优先保留主体、关系、构图、镜头、光线、风格主轴、Exact text、Avoid；删除重复品质词和互相稀释的风格词
+20. 光影必须物理一致：不要写 harsh sunlight with diffused shadows；需要折中时使用 strong but slightly softened shadows 或 crisp sunlight with gentle bounce lighting
+21. 多角色平衡：如果存在 3 个及以上具名角色，每个主要角色都必须有明确位置、动作或关系，避免只写主角而让边缘角色消失
+22. 手机自拍/快照优先真实感：若原始提示词包含 selfie、phone snapshot、手机、自拍、随手拍、抓拍，强化 casual off-center composition、slightly tilted framing、subtle smartphone HDR look、slight overexposure、imperfect candid timing、natural facial asymmetry，并减少 cinematic/studio/masterpiece 类过度专业化词
+23. 禁止输出 JSON 以外的解释文本`;
 
 
 
@@ -674,6 +679,7 @@ export function buildOptimizeMessages(userPrompt, params) {
   if (focusElems.length > 0) {
     focusDesc = focusElems.map(e => `${e.name}: ${e.focusPoint}`).join(', ');
   }
+  const arbitrationDesc = summarizePromptArbitration(userPrompt, allElems, styleLevel);
 
   // Scene — use English keys, per-light details
   let sceneDesc = 'default';
@@ -719,6 +725,9 @@ Original prompt:
 ${userPrompt}
 
 Target style: ${styleLabel}
+
+Prompt arbitration:
+${arbitrationDesc}
 
 Composition: ${compDesc}
 
@@ -1293,6 +1302,31 @@ function quoteExactText(text) {
   const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
   if (!normalized) return '""';
   return `"${normalized.replace(/"/g, '\\"')}"`;
+}
+
+function summarizePromptArbitration(userPrompt, elements = [], styleLevel = 3) {
+  const text = String(userPrompt || '').toLowerCase();
+  const namedElements = (Array.isArray(elements) ? elements : [])
+    .filter((item) => item?.layer === 'foreground' && item?.name && !isTextPassthroughElement(item));
+  const hints = [];
+  const styleBand = styleLevel <= 3 ? 'anime/illustration' : styleLevel >= 8 ? 'photo/realistic' : 'semi-realistic';
+  hints.push(`Primary visual direction: ${styleBand}; use it as the style anchor and avoid stacking unrelated style families.`);
+  hints.push('Density budget: keep finalPrompt compact; remove duplicated quality words and weak style buzzwords before adding new ones.');
+
+  if (/\b(selfie|phone snapshot|smartphone|candid snapshot|casual photo)\b|自拍|手机|随手拍|抓拍/.test(text)) {
+    hints.push('Snapshot intent detected: prioritize imperfect smartphone framing, slight tilt, subtle HDR, slight overexposure, candid timing, and natural facial asymmetry; avoid polished studio/cinematic wording unless explicitly requested.');
+  }
+
+  if (/\b(harsh|hard|midday|noon)\b/.test(text) || /正午|烈日|硬光/.test(text)) {
+    hints.push('Hard-light intent detected: keep shadows crisp or slightly softened by bounce light; never describe harsh light as fully diffused.');
+  }
+
+  if (namedElements.length >= 3) {
+    const names = namedElements.slice(0, 6).map((item) => item.name).join(', ');
+    hints.push(`Multi-character balance: preserve visible presence for each foreground subject (${names}); each needs position plus action or relationship.`);
+  }
+
+  return hints.map((item) => `- ${item}`).join('\n');
 }
 
 function collectNegativePrompts(elements = [], canvasNegativePrompt = null) {
